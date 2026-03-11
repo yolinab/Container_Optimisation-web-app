@@ -1,47 +1,67 @@
-import numpy as np
-from cpmpy import *
-from cpmpy.expressions.globalconstraints import Element
-from config import CONTAINER_LENGTH_CM, CONTAINER_DOOR_HEIGHT_CM, CONTAINER_MAX_WEIGHT_KG, ROW_GAP_CM
+"""
+1D Row-Block Subset + Placement Model using OR-Tools CP-SAT directly.
+
+Replaces the former cpmpy-based implementation so the code runs on any
+ortools version (including 9.15+) without cpmpy compatibility issues.
+
+Public interface is identical to the previous version:
+  model = RowBlock1DOrderModel(lengths_cm, heights_cm, weights_kg, values, ...)
+  solved = model.solve(solver='ortools', time_limit=5)
+  order  = model.loaded_indices_in_order()   # list of 1-based block indices
+  model.usedLen.value()
+  model.loadedValue.value()
+  model.loadedWeight.value()
+"""
+
+from ortools.sat.python import cp_model
+
+from config import (
+    CONTAINER_LENGTH_CM, CONTAINER_DOOR_HEIGHT_CM,
+    CONTAINER_MAX_WEIGHT_KG, ROW_GAP_CM,
+)
+
+
+class _ValueProxy:
+    """Mimics cpmpy's intvar.value() so pipeline.py needs no changes."""
+    def __init__(self, solver, var):
+        self._solver = solver
+        self._var = var
+
+    def value(self):
+        return self._solver.Value(self._var)
 
 
 class RowBlock1DOrderModel:
     """
-    1D Row-Block Subset + Placement Model (single container)
-    using ORDER-BASED space encoding.
+    1D Row-Block Subset + Placement Model (single container).
 
-    - Decision is a sequence of row slots: slot[r] ∈ {0..N}
-        slot[r]=i means row-block instance i is placed at row position r (back -> door).
-        slot[r]=0 means empty (unused).
-      Contiguity ensures all used rows form a prefix.
-
-    - Subset selection is implicit: blocks not appearing in slot[] are "left out"
-      for the next container in your outer loop.
+    Decision: slot[r] in {0..N}
+      slot[r] = i  → block i is placed at row position r (back → door)
+      slot[r] = 0  → row r is empty
 
     Hard constraints:
-      * length feasibility: sum row lengths + g*(rowsUsed-1) <= L
-      * payload limit: sum row weights <= Wmax
-      * hard height ordering: row heights non-increasing back->door
-      * door height limit: last used row height <= Hdoor
+      * length:  sum(row lengths) + gap*(rowsUsed-1) <= L
+      * weight:  sum(row weights) <= Wmax
+      * heights: non-increasing back → door
+      * door:    last used row height <= Hdoor
 
-    Optional speed knobs:
-      * unload_limit: N - rowsUsed <= unload_limit
-      * min_loaded_value: loadedValue >= min_loaded_value
-
-    Objective:
-      maximize BIG*loadedValue + usedLen
-      (lex-like: loadedValue dominates, usedLen tie-break)
+    Objective: maximise BIG*loadedValue + usedLen  (lex-like)
     """
 
-    def __init__(self,
-                 lengths_cm, heights_cm, weights_kg, values,
-                 L_cm=CONTAINER_LENGTH_CM, gap_cm=ROW_GAP_CM, Wmax_kg=CONTAINER_MAX_WEIGHT_KG, Hdoor_cm=CONTAINER_DOOR_HEIGHT_CM,
-                 Rmax=None,
-                 unload_limit=None,
-                 min_loaded_value=None):
-        # ---------- Store input ----------
-        self.L = int(L_cm)
-        self.g = int(gap_cm)
-        self.Wmax = int(Wmax_kg)
+    def __init__(
+        self,
+        lengths_cm, heights_cm, weights_kg, values,
+        L_cm=CONTAINER_LENGTH_CM,
+        gap_cm=ROW_GAP_CM,
+        Wmax_kg=CONTAINER_MAX_WEIGHT_KG,
+        Hdoor_cm=CONTAINER_DOOR_HEIGHT_CM,
+        Rmax=None,
+        unload_limit=None,
+        min_loaded_value=None,
+    ):
+        self.L     = int(L_cm)
+        self.g     = int(gap_cm)
+        self.Wmax  = int(Wmax_kg)
         self.Hdoor = int(Hdoor_cm)
 
         self.len_in = [int(x) for x in lengths_cm]
@@ -52,159 +72,168 @@ class RowBlock1DOrderModel:
         self.N = len(self.len_in)
         assert self.N == len(self.h_in) == len(self.w_in) == len(self.val_in)
 
-        # Safe 0-indexed arrays so slot=0 is valid and contributes 0
+        # 0-padded lookup arrays (index 0 = empty slot, contributes 0)
         self.len0 = [0] + self.len_in
         self.h0   = [0] + self.h_in
         self.w0   = [0] + self.w_in
         self.val0 = [0] + self.val_in
 
-        # Choose a safe Rmax if not provided
         if Rmax is None:
             min_len = min(self.len_in) if self.N > 0 else self.L
-            # upper bound on number of rows that can fit (used rows form prefix)
             Rmax = (self.L + self.g) // (min_len + self.g) if (min_len + self.g) > 0 else self.N
-            Rmax = max(1, min(Rmax, self.N))  # never exceed N, at least 1
+            Rmax = max(1, min(Rmax, self.N))
         self.Rmax = int(Rmax)
 
-        self.unload_limit = unload_limit
-        self.min_loaded_value = min_loaded_value
+        self._cp_model  = cp_model.CpModel()
+        self._cp_solver = cp_model.CpSolver()
 
-        # ---------- Build model ----------
-        self._create_variables()
-        self._create_constraints()
-        self._create_objective()
+        self._build(unload_limit, min_loaded_value)
 
-    # ------------------------------
-    # Variables
-    # ------------------------------
-    def _create_variables(self):
-        N = self.N
-        R = self.Rmax
-
-        # slot[r] in 0..N (0 = empty, i = choose block instance i)
-        self.slot = np.atleast_1d(intvar(0, N, shape=R, name="slot"))
-
-        # convenient bools
-        self.used = np.atleast_1d(boolvar(shape=R, name="used"))      # used[r] <-> slot[r] != 0
-
-        # how many rows used
-        self.rowsUsed = intvar(0, R, name="rowsUsed")
-
-        # gap count = max(0, rowsUsed-1)
-        self.gapCount = intvar(0, R, name="gapCount")
-
-        # aggregates
-        self.usedLen = intvar(0, self.L, name="usedLen")
-        self.loadedWeight = intvar(0, self.Wmax, name="loadedWeight")  # bounded
-        # loadedValue upper bound: sum of all values
-        self.loadedValue = intvar(0, sum(self.val_in), name="loadedValue")
-
-        # load[i] like your old model (for pipeline extraction)
-        self.load = np.atleast_1d(boolvar(shape=N, name="load"))
-
-        self.model = Model()
-
-    # ------------------------------
-    # Constraints
-    # ------------------------------
-    def _create_constraints(self):
-        m = self.model
+    # ------------------------------------------------------------------
+    def _build(self, unload_limit, min_loaded_value):
+        m = self._cp_model
         N = self.N
         R = self.Rmax
         g = self.g
 
-        # (C0) used[r] <-> slot[r] != 0
-        for r in range(R):
-            m += (self.used[r] == (self.slot[r] != 0))
+        # ── Variables ──────────────────────────────────────────────────
+        slot = [m.NewIntVar(0, N, f'slot_{r}') for r in range(R)]
+        used = [m.NewBoolVar(f'used_{r}')       for r in range(R)]
 
-        # (C1) contiguity: once empty, always empty
+        rows_used  = m.NewIntVar(0, R,          'rowsUsed')
+        gap_count  = m.NewIntVar(0, max(R-1,0), 'gapCount')
+        used_len   = m.NewIntVar(0, self.L,     'usedLen')
+        loaded_wt  = m.NewIntVar(0, self.Wmax,  'loadedWeight')
+        total_val  = sum(self.val_in) if self.val_in else 0
+        loaded_val = m.NewIntVar(0, total_val,  'loadedValue')
+
+        max_len = max(self.len0)
+        max_h   = max(self.h0)
+        max_w   = max(self.w0)
+        max_val = max(self.val0) if self.val0 else 0
+
+        # Element proxy vars: X_slot[r] = X0[slot[r]]
+        len_slot = [m.NewIntVar(0, max_len, f'ls_{r}') for r in range(R)]
+        h_slot   = [m.NewIntVar(0, max_h,   f'hs_{r}') for r in range(R)]
+        w_slot   = [m.NewIntVar(0, max_w,   f'ws_{r}') for r in range(R)]
+        val_slot = [m.NewIntVar(0, max_val, f'vs_{r}') for r in range(R)]
+
+        # Store refs needed by pipeline helpers
+        self._slot       = slot
+        self._used_len   = used_len
+        self._loaded_val = loaded_val
+        self._loaded_wt  = loaded_wt
+
+        # ── Element lookups ────────────────────────────────────────────
+        for r in range(R):
+            m.AddElement(slot[r], self.len0, len_slot[r])
+            m.AddElement(slot[r], self.h0,   h_slot[r])
+            m.AddElement(slot[r], self.w0,   w_slot[r])
+            m.AddElement(slot[r], self.val0, val_slot[r])
+
+        # ── C0: used[r] <-> slot[r] != 0 ──────────────────────────────
+        for r in range(R):
+            m.Add(slot[r] >= 1).OnlyEnforceIf(used[r])
+            m.Add(slot[r] == 0).OnlyEnforceIf(used[r].Not())
+
+        # ── C1: contiguity — once empty, always empty ──────────────────
         for r in range(R - 1):
-            m += (self.slot[r] == 0).implies(self.slot[r + 1] == 0)
+            m.AddImplication(used[r].Not(), used[r + 1].Not())
 
-        # (C2) no duplicate nonzero slots (each block used at most once)
+        # ── C2: no duplicate non-zero slots ───────────────────────────
+        # Encode via auxiliary vars: aux[r] = slot[r] if used, else N+1+r
+        # Then AllDifferent(aux) guarantees unique block assignments.
+        aux_slots = []
         for r in range(R):
-            for s in range(r + 1, R):
-                m += ((self.slot[r] != 0) & (self.slot[s] != 0)).implies(self.slot[r] != self.slot[s])
+            aux = m.NewIntVar(1, N + R, f'aux_{r}')
+            m.Add(aux == slot[r]).OnlyEnforceIf(used[r])
+            m.Add(aux == N + 1 + r).OnlyEnforceIf(used[r].Not())
+            aux_slots.append(aux)
+        m.AddAllDifferent(aux_slots)
 
-        # (C3) rowsUsed = sum used[r]
-        m += (self.rowsUsed == sum(self.used[r] for r in range(R)))
+        # ── C3: rowsUsed ───────────────────────────────────────────────
+        m.Add(rows_used == sum(used))
 
-        # (C4) gapCount = max(0, rowsUsed-1)
-        # Implement robustly with reification:
-        m += (self.rowsUsed == 0).implies(self.gapCount == 0)
-        m += (self.rowsUsed > 0).implies(self.gapCount == self.rowsUsed - 1)
+        # ── C4: gapCount = max(0, rowsUsed - 1) ───────────────────────
+        any_used = m.NewBoolVar('any_used')
+        m.Add(rows_used >= 1).OnlyEnforceIf(any_used)
+        m.Add(rows_used == 0).OnlyEnforceIf(any_used.Not())
+        m.Add(gap_count == 0).OnlyEnforceIf(any_used.Not())
+        m.Add(gap_count == rows_used - 1).OnlyEnforceIf(any_used)
 
-        # (C5) usedLen = sum len(slot[r]) + g*gapCount, length limit
-        len_terms = [Element(self.len0, self.slot[r]) for r in range(R)]
-        m += (self.usedLen == sum(len_terms) + g * self.gapCount)
-        m += (self.usedLen <= self.L)
+        # ── C5: length constraint ──────────────────────────────────────
+        m.Add(used_len == sum(len_slot) + g * gap_count)
+        m.Add(used_len <= self.L)
 
-        # (C6) weight constraint
-        weight_terms = [Element(self.w0, self.slot[r]) for r in range(R)]
-        m += (self.loadedWeight == sum(weight_terms))
-        m += (self.loadedWeight <= self.Wmax)
+        # ── C6: weight constraint ──────────────────────────────────────
+        m.Add(loaded_wt == sum(w_slot))
+        m.Add(loaded_wt <= self.Wmax)
 
-        # (C7) loaded value
-        value_terms = [Element(self.val0, self.slot[r]) for r in range(R)]
-        m += (self.loadedValue == sum(value_terms))
+        # ── C7: value ─────────────────────────────────────────────────
+        m.Add(loaded_val == sum(val_slot))
 
-        # (C8) hard height ordering back -> door
-        # Because h0[0]=0 and empties must be at end, this works cleanly.
+        # ── C8: height ordering — non-increasing back → door ──────────
         for r in range(R - 1):
-            m += (Element(self.h0, self.slot[r]) >= Element(self.h0, self.slot[r + 1]))
+            m.Add(h_slot[r] >= h_slot[r + 1])
 
-        # (C9) door row height constraint on LAST USED row
-        # Using implications on "r is last used":
-        # last used row r satisfies: slot[r]!=0 and (r==R-1 or slot[r+1]==0)
+        # ── C9: door height on the last used row ──────────────────────
         for r in range(R):
-            is_used = (self.slot[r] != 0)
-            is_last = is_used & ((r == R - 1) | (self.slot[r + 1] == 0) if r < R - 1 else True)
-            # If r is last used row, enforce height <= Hdoor
-            m += is_last.implies(Element(self.h0, self.slot[r]) <= self.Hdoor)
+            if r < R - 1:
+                m.Add(h_slot[r] <= self.Hdoor).OnlyEnforceIf(
+                    [used[r], used[r + 1].Not()]
+                )
+            else:
+                m.Add(h_slot[r] <= self.Hdoor).OnlyEnforceIf(used[r])
 
-        # (C10) load[i] <-> i appears in some slot
-        for i in range(1, N + 1):
-            m += (self.load[i - 1] == any(self.slot[r] == i for r in range(R)))
+        # ── Optional constraints ───────────────────────────────────────
+        if unload_limit is not None:
+            m.Add(N - rows_used <= int(unload_limit))
+        if min_loaded_value is not None:
+            m.Add(loaded_val >= int(min_loaded_value))
 
-        # (Optional) unload_limit: N - rowsUsed <= unload_limit
-        if self.unload_limit is not None:
-            m += (N - self.rowsUsed <= int(self.unload_limit))
+        # ── Objective ─────────────────────────────────────────────────
+        BIG = 10 ** 6
+        m.Maximize(BIG * loaded_val + used_len)
 
-        # (Optional) min_loaded_value
-        if self.min_loaded_value is not None:
-            m += (self.loadedValue >= int(self.min_loaded_value))
+    # ------------------------------------------------------------------
+    def solve(self, solver='ortools', time_limit=None):
+        if time_limit is not None:
+            self._cp_solver.parameters.max_time_in_seconds = float(time_limit)
+        # Support both old (Solve) and new (solve) ortools CpSolver API
+        if hasattr(self._cp_solver, 'Solve'):
+            status = self._cp_solver.Solve(self._cp_model)
+        else:
+            status = self._cp_solver.solve(self._cp_model)
+        return status in (cp_model.OPTIMAL, cp_model.FEASIBLE)
 
-    # ------------------------------
-    # Objective
-    # ------------------------------
-    def _create_objective(self):
-        # Lex-like maximize loadedValue, then maximize usedLen
-        BIG = 10**6
-        self.model.maximize(BIG * self.loadedValue + self.usedLen)
+    # ------------------------------------------------------------------
+    # Pipeline-compatible interface (mirrors old cpmpy-based class)
+    # ------------------------------------------------------------------
+    @property
+    def usedLen(self):
+        return _ValueProxy(self._cp_solver, self._used_len)
 
-    # ------------------------------
-    # Solve
-    # ------------------------------
-    def solve(self, **solver_args):
-        return self.model.solve(**solver_args)
+    @property
+    def loadedValue(self):
+        return _ValueProxy(self._cp_solver, self._loaded_val)
 
-    # ------------------------------
-    # Helpers for pipeline
-    # ------------------------------
+    @property
+    def loadedWeight(self):
+        return _ValueProxy(self._cp_solver, self._loaded_wt)
+
     def loaded_indices_in_order(self):
-        """Return block instance indices in back->door order (1..N), excluding 0."""
-        return [int(self.slot[r].value()) for r in range(self.Rmax) if int(self.slot[r].value()) != 0]
+        """Return block indices (1..N) in back→door order, excluding 0."""
+        return [
+            int(self._cp_solver.Value(self._slot[r]))
+            for r in range(self.Rmax)
+            if int(self._cp_solver.Value(self._slot[r])) != 0
+        ]
 
     def unloaded_indices(self):
-        """Return block indices (1..N) not loaded."""
-        loaded_set = set(self.loaded_indices_in_order())
-        return [i for i in range(1, self.N + 1) if i not in loaded_set]
+        loaded = set(self.loaded_indices_in_order())
+        return [i for i in range(1, self.N + 1) if i not in loaded]
 
     def compute_y_starts(self):
-        """
-        Deterministically reconstruct y-start positions from the slot order.
-        Returns list of (block_index, y_start_cm).
-        """
         order = self.loaded_indices_in_order()
         y = 0
         out = []
