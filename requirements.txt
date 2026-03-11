@@ -1,8 +1,8 @@
 fastapi
 uvicorn[standard]
 python-multipart
-cpmpy==0.9.22
-ortools==9.7.2996
+cpmpy
+ortools
 pandas
 openpyxl
 numpy
