@@ -89,23 +89,19 @@ def _has_recommendations(rec: dict) -> bool:
 
 
 def _vol_fill_pct(container: dict, W: int, Hdoor: int, L: int) -> float:
-    """Volumetric fill %: claimed space / (L × W × Hdoor) × 100.
+    """Volumetric fill %: actual goods volume / (L × W × Hdoor) × 100.
 
-    Both pallets and NP box zones are counted by their CLAIMED zone volume,
-    not the material volume of the goods inside them.  This is consistent:
-      - Pallet block: length × container_width × block_height  (full cross-section)
-      - NP box zone:  zone_length × zone_width × zone_height   (full claimed space)
-    Once a zone is assigned to NP boxes it is operationally full — no pallets
-    can be added there — so counting its full volume is the correct basis for
-    the fill metric that drives packing decisions.
+    - Pallet block: length × container_width × block_height  (full cross-section)
+    - NP box zone:  sum of actual placed-box volumes (length × width × height × qty)
     """
     pallet_vol = sum(
         r["length_cm"] * W * r["height_cm"]
         for r in container.get("rows", [])
     )
     box_zone_vol = sum(
-        z["length_cm"] * z["width_cm"] * z["height_cm"]
+        p["length_cm"] * p["width_cm"] * p["height_cm"] * p["quantity"]
         for z in container.get("box_zones", [])
+        for p in z.get("placed", [])
     )
     container_vol = float(L * W * Hdoor)
     if container_vol <= 0:
