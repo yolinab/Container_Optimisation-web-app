@@ -14,6 +14,35 @@ from pathlib import Path
 # Make app/ importable without installing as a package
 sys.path.insert(0, str(Path(__file__).parent / "app"))
 
+# ── ortools 9.15 compatibility patch ──────────────────────────────────────────
+# cpmpy 0.10.0 calls ort_solver.solve(model, solution_callback=None).
+# ortools 9.15+ removed the solution_callback parameter entirely.
+# Patch whichever CpSolver method (solve/Solve) no longer accepts it.
+try:
+    import inspect
+    from ortools.sat.python import cp_model as _ort
+
+    for _name in ("solve", "Solve"):
+        _method = getattr(_ort.CpSolver, _name, None)
+        if _method is None:
+            continue
+        try:
+            _params = inspect.signature(_method).parameters
+        except (ValueError, TypeError):
+            continue
+        if "solution_callback" not in _params:
+            # This version dropped solution_callback — wrap it so callers can still pass it safely
+            def _make_compat(_orig):
+                def _compat(self, model, solution_callback=None, **kwargs):
+                    if solution_callback is not None:
+                        return _orig(self, model, solution_callback=solution_callback, **kwargs)
+                    return _orig(self, model, **kwargs)
+                return _compat
+            setattr(_ort.CpSolver, _name, _make_compat(_method))
+except Exception:
+    pass
+# ──────────────────────────────────────────────────────────────────────────────
+
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
