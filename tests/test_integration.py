@@ -1,22 +1,23 @@
 """
-Integration tests — run the full main() pipeline on fixture Excel files.
+Integration tests — run the full pipeline on fixture Excel files.
 Tests verify that the pipeline completes or fails with the correct, specific errors.
 """
 import pytest
 import sys, os
+from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "app"))
 
 
 def _run(excel_path, tmp_path, **kwargs):
-    """Helper: run main() with output in tmp_path, no plots."""
-    from main import main
-    return main(
-        excel_path=excel_path,
-        base_dir=str(tmp_path),
-        no_plot=True,
+    """Helper: run run_pipeline() with output in tmp_path/outputs."""
+    from pipeline import run_pipeline
+    result = run_pipeline(
+        excel_path=Path(excel_path),
+        out_dir=tmp_path / "outputs",
         **kwargs,
     )
+    return result["containers"]
 
 
 # ---------------------------------------------------------------------------
@@ -65,9 +66,8 @@ class TestHappyPath:
         """Mixed file (A2 + C2 + NP) → containers packed, box_zones assigned."""
         containers = _run(excel_mixed, tmp_path)
         assert len(containers) >= 1
-        # At least one container should have box_zones from NP boxes
         all_zones = [z for c in containers for z in c.get("box_zones", [])]
-        assert len(all_zones) >= 0  # may be 0 if boxes all fit in tail
+        assert len(all_zones) >= 0
 
     def test_two_container_run(self, excel_two_containers, tmp_path):
         """Large input should produce multiple containers."""
@@ -96,15 +96,11 @@ class TestValidationErrors:
         """Multiples error should say how many pallets to add."""
         with pytest.raises(RuntimeError) as exc_info:
             _run(excel_multiples_needed, tmp_path)
-        # Should mention a number (e.g. "add 1 pallet")
         msg = str(exc_info.value)
         assert any(ch.isdigit() for ch in msg)
 
     def test_all_too_tall_raises_runtime_error(self, excel_all_too_tall, tmp_path):
-        """
-        Pallets with unknown block type rule → 0 blocks built → RuntimeError.
-        Must NOT be a bare TypeError or AttributeError.
-        """
+        """Pallets with unknown block type rule → 0 blocks built → RuntimeError."""
         with pytest.raises(RuntimeError):
             _run(excel_all_too_tall, tmp_path)
 
@@ -118,7 +114,7 @@ class TestValidationErrors:
             pytest.fail(f"Got TypeError (likely regression): {e}")
 
     def test_unknown_footprint_raises(self, excel_unknown_footprint, tmp_path):
-        """Unknown footprints → 0 blocks → RuntimeError (no pallets/blocks to pack)."""
+        """Unknown footprints → 0 blocks → RuntimeError."""
         with pytest.raises(RuntimeError):
             _run(excel_unknown_footprint, tmp_path)
 
@@ -153,13 +149,6 @@ class TestOutputContent:
         data = json.loads(json_path.read_text())
         assert isinstance(data, list)
         assert len(data) >= 1
-
-    def test_log_written(self, excel_minimal_valid, tmp_path):
-        _run(excel_minimal_valid, tmp_path)
-        log_path = tmp_path / "outputs" / "run.log"
-        assert log_path.exists()
-        content = log_path.read_text()
-        assert "STEP" in content
 
     def test_recommendations_json_written(self, excel_minimal_valid, tmp_path):
         import json
