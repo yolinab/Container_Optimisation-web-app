@@ -1,3 +1,4 @@
+import math
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 from collections import Counter
@@ -124,8 +125,10 @@ def build_box_zone_visuals(
         vol_used = zone.get("volume_used_cm3", 0.0)
         zone_H_max = zone["height_cm"]
 
-        # Rendered fill height = volume-equivalent average height over the zone footprint
-        footprint = zone_L * zone_W
+        # zone_L is now the actual length used by placed boxes (from the length cursor),
+        # so render the zone at that size. Fill height = vol / (length × width).
+        dense_length = max(1, zone_L)
+        footprint = dense_length * zone_W
         h_fill = (vol_used / footprint) if footprint > 0 else 0.0
         h_fill = min(h_fill, zone_H_max)
 
@@ -159,7 +162,7 @@ def build_box_zone_visuals(
             "y":        zone["y_start_cm"],
             "z":        zone["z_base_cm"],
             "w":        zone_W,
-            "l":        zone_L,
+            "l":        dense_length,
             "h_fill":   h_fill,
             "h_zone":   zone_H_max,
             "color":    _BOX_ZONE_FILL_COLORS[zi % len(_BOX_ZONE_FILL_COLORS)],
@@ -291,20 +294,19 @@ def plot_boxes_3d(W, L, H, boxes, box_zone_visuals=None, rec_box_visuals=None, t
             x, y, z = bz["x"], bz["y"], bz["z"]
             w, l    = bz["w"], bz["l"]
             h_fill  = bz["h_fill"]
-            h_zone  = bz["h_zone"]
 
-            # Dashed wireframe showing the full available zone boundary
-            _draw_box_wireframe(ax, x, y, z, w, l, h_zone,
-                                color="darkorange", linestyle="--", linewidth=1.1)
-
-            # Semi-transparent fill showing how much of the zone is occupied
+            # Draw actual box volume only (volume-equivalent height bar)
             if h_fill > 0.5:
                 ax.bar3d(x, y, z, w, l, h_fill,
-                         alpha=0.22, color=bz["color"],
-                         edgecolor="none", shade=False)
+                         alpha=0.55, color=bz["color"],
+                         edgecolor="darkorange", linewidth=0.8, shade=True)
+            else:
+                # Nearly nothing placed — just draw a thin marker line
+                _draw_box_wireframe(ax, x, y, z, w, l, 2,
+                                    color="darkorange", linestyle="--", linewidth=0.8)
 
-            # Label above the filled region
-            label_z = z + max(h_fill, h_zone) + 3
+            # Label just above the bar
+            label_z = z + max(h_fill, 3) + 2
             ax.text(x + w / 2, y + l / 2, label_z,
                     f"NP ×{bz['n_boxes']}\n({bz['zone_type']})",
                     color="darkorange", fontsize=7,

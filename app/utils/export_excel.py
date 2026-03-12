@@ -265,17 +265,11 @@ def _write_overview(ws, containers, recs, np_boxes, unplaced, config):
         for j, val in enumerate(data):
             col  = 1 + j
             cell = _set_cell(ws, r, col, val, bg=bg, h="center", border=True)
-            if j == 3:   # Fill % cell
-                # Keep numeric fill_p so the bar chart can still read it.
-                # Use a number format to control the display without altering the value.
-                if optimal:
-                    cell.number_format = '"✓"'   # any number → literal ✓
-                    cell.fill = _fill(_TL_GOOD)
-                    cell.font = _font(bold=True, color=_WHITE, size=13)
-                else:
-                    cell.number_format = '0.0"%"'
-                    cell.fill = _fill(_TL_OK)
-                    cell.font = _font(bold=True, color=_WHITE, size=10)
+            if j == 3:   # Fill % cell — always show numeric %, green if well-filled
+                well_filled = fill_p >= 85
+                cell.number_format = '0.0"%"'
+                cell.fill = _fill(_TL_GOOD if well_filled else _TL_OK)
+                cell.font = _font(bold=True, color=_WHITE, size=10)
             elif j in (1, 2):
                 cell.number_format = '#,##0'
             elif j == 5:
@@ -543,8 +537,7 @@ def _write_layout(ws, containers, recs, config):
         used   = c["used_length_cm"]
         fill_p  = _vol_fill_pct(c, W, Hdoor, L)
         rec     = rec_by_idx.get(idx, {})
-        optimal = not _has_recommendations(rec)
-        tl      = _TL_GOOD if optimal else _TL_OK
+        tl      = _TL_GOOD if fill_p >= 85 else _TL_OK
 
         rows_data = c.get("rows", [])
         zones     = c.get("box_zones", [])
@@ -576,10 +569,10 @@ def _write_layout(ws, containers, recs, config):
                      pallet_row + n_sub_rows - 1, 2,
                      fill_p,
                      bold=True, fg=_WHITE, bg=tl,
-                     size=11 if optimal else 9, h="center", v="center")
+                     size=9, h="center", v="center")
         fill_cell = ws.cell(row=pallet_row, column=2)
         fill_cell.fill = _fill(tl)
-        fill_cell.number_format = '[>=85]"✓";0.0"%"'
+        fill_cell.number_format = '0.0"%"'
 
         # Layer labels in col 3
         _set_cell(ws, pallet_row, 3, "Pallets", size=7, h="center", bg=_LIGHT_GRAY)
