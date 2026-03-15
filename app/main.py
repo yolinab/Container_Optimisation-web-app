@@ -453,6 +453,10 @@ def main(
             L=L_cm,
             Wmax_kg=Wmax_kg,
         )
+        # Update leftover_cm to reflect space consumed by NP boxes
+        for container in containers:
+            box_len = sum(z["length_cm"] for z in container.get("box_zones", []))
+            container["leftover_cm"] = max(0, container["leftover_cm"] - box_len)
 
         print("\n--- NP Box Assignment Summary ---")
         for c in containers:

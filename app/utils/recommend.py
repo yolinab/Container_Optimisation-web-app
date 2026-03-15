@@ -27,6 +27,16 @@ from utils.oneDbuildblocks import build_block_type_table, BlockType
 # Internal helpers                                                     #
 # ------------------------------------------------------------------ #
 
+def _compute_order_qty_by_key(containers: List[Dict[str, Any]]) -> Dict[str, int]:
+    """Total pallets placed per block_type_key across ALL containers."""
+    qty: Dict[str, int] = {}
+    for c in containers:
+        for row in c.get("rows", []):
+            k = row.get("block_type", "")
+            qty[k] = qty.get(k, 0) + int(row.get("pallet_count", 0))
+    return qty
+
+
 def _compute_type_price_fob(containers: List[Dict[str, Any]]) -> Dict[str, float]:
     """Average FOB price per pallet, keyed by block_type_key."""
     totals: Dict[str, float] = {}
@@ -291,6 +301,115 @@ def _aggregate_placements(
     }
 
 
+def _proportional_tail(
+    avail_L: int,
+    H_avail: int,
+    pallet_cands: List[Dict[str, Any]],
+    np_box_cands: List[Dict[str, Any]],
+    gap_cm: int,
+    leading_gap_cm: int,
+    order_qty_by_key: Dict[str, int],
+    y_base: int,
+    objective: str,
+    secondary: str,
+    price_by_type: Dict[str, float],
+) -> Tuple[List[Dict[str, Any]], int]:
+    """
+    Fill the tail zone with:
+      1. Pallets at z=0, distributed proportionally to their global order quantities.
+      2. NP boxes filling ALL remaining Y-space with full 2-D (Y × Z) stacking up
+         to H_avail — so boxes use the full available height, not just one layer.
+
+    Pallet type share = order_qty[type] / total_order_qty.
+    Space per type   = floor(budget × share / slot_length) blocks.
+    Surplus after rounding is redistributed to highest-share types.
+
+    Returns (placements, leftover_L).
+    """
+    # One candidate per key — use the longest block for maximum pallet coverage.
+    by_key: Dict[str, Dict] = {}
+    for c in pallet_cands:
+        k = c["key"]
+        if k not in by_key or c["length_cm"] > by_key[k]["length_cm"]:
+            by_key[k] = c
+
+    # Restrict to keys that appear in the global order (qty > 0).
+    active = {k: v for k, v in by_key.items() if order_qty_by_key.get(k, 0) > 0}
+    if not active:
+        active = by_key   # fallback: all candidates with equal shares
+
+    budget = avail_L - leading_gap_cm
+    if not active or budget <= 0:
+        # No pallets — fill the entire tail with 2-D box stacking.
+        box_pls, leftover = _greedy_fill_2d(
+            avail_L=avail_L, H_avail=H_avail,
+            candidates=np_box_cands, gap_cm=gap_cm,
+            objective=objective, secondary=secondary,
+            price_by_type=price_by_type,
+            leading_gap_cm=leading_gap_cm, y_base=y_base, z_base=0,
+        )
+        return box_pls, leftover
+
+    # Proportional shares.
+    total_qty = sum(order_qty_by_key.get(k, 0) for k in active)
+    if total_qty == 0:
+        shares = {k: 1.0 / len(active) for k in active}
+    else:
+        shares = {k: order_qty_by_key[k] / total_qty for k in active}
+
+    # Allocate block counts proportionally (slot = block length + inter-block gap).
+    alloc: Dict[str, int] = {}
+    for k, cand in active.items():
+        slot = cand["length_cm"] + gap_cm
+        alloc[k] = max(0, int(budget * shares[k] / slot))
+
+    # Redistribute unallocated surplus to highest-share types.
+    used_budget = sum(alloc[k] * (active[k]["length_cm"] + gap_cm) for k in active)
+    surplus = budget - used_budget
+    min_slot = min(active[k]["length_cm"] + gap_cm for k in active)
+    for k in sorted(active, key=lambda k: -shares[k]):
+        if surplus < min_slot:
+            break
+        slot = active[k]["length_cm"] + gap_cm
+        extra = int(surplus // slot)
+        if extra > 0:
+            alloc[k] += extra
+            surplus -= extra * slot
+
+    # Build pallet placements at z=0, highest-share types first.
+    placements: List[Dict[str, Any]] = []
+    y_cursor = y_base + leading_gap_cm
+    for k in sorted(active, key=lambda k: -shares[k]):
+        n = alloc[k]
+        if n == 0:
+            continue
+        cand = active[k]
+        for _ in range(n):
+            p = dict(cand)
+            p["y_start_cm"] = y_cursor
+            p["z_base_cm"]  = 0
+            placements.append(p)
+            y_cursor += cand["length_cm"] + gap_cm
+
+    # Remaining Y-length after pallets → fill with 2-D box stacking (Y × Z).
+    pallet_used = y_cursor - y_base - leading_gap_cm
+    remaining   = budget - pallet_used
+
+    if remaining > 0 and np_box_cands and H_avail > 0:
+        box_pls, leftover = _greedy_fill_2d(
+            avail_L=remaining, H_avail=H_avail,
+            candidates=np_box_cands, gap_cm=gap_cm,
+            objective=objective, secondary=secondary,
+            price_by_type=price_by_type,
+            leading_gap_cm=0, y_base=y_cursor, z_base=0,
+        )
+        placements.extend(box_pls)
+    else:
+        leftover = remaining
+
+    return placements, leftover
+
+
 # ------------------------------------------------------------------ #
 # Public API                                                           #
 # ------------------------------------------------------------------ #
@@ -322,9 +441,10 @@ def recommend_fill_containers(
     np_boxes — list of NP box type dicts from the current order.  These are
                treated as full-width row placements alongside pallet blocks.
     """
-    type_table        = build_block_type_table(Hdoor_cm)
-    price_by_type     = _compute_type_price_fob(containers)
+    type_table          = build_block_type_table(Hdoor_cm)
+    price_by_type       = _compute_type_price_fob(containers)
     np_box_cands_global = _build_np_box_candidates(np_boxes or [], W)
+    order_qty_by_key    = _compute_order_qty_by_key(containers)
 
     results = []
     for container in containers:
@@ -343,35 +463,35 @@ def recommend_fill_containers(
                 actual_height_by_key[k] = h
 
         pallet_cands = _build_pallet_candidates(used_keys, type_table, actual_height_by_key)
-        # NP boxes go in the tail only — never on top of pallets.
-        all_tail_cands = pallet_cands + np_box_cands_global
 
         # ── Account for NP boxes already placed in the tail ─────────────────
-        # Boxes are packed tail-only (no atop). Measure how much tail they consumed
-        # so recommendations start past the box zone, not on top of it.
+        # leftover_cm has already been reduced by box packing (see pipeline/main).
+        # We still need np_tail_length to compute the correct y-offset so
+        # recommendations are placed AFTER the box zone, not on top of it.
         box_zones = container.get("box_zones", [])
         np_tail_length = sum(
             z["length_cm"] for z in box_zones if z.get("zone_type") == "tail"
         )
-        # Remaining tail available for pallet recommendations
-        rec_tail_L  = max(0, tail_L - np_tail_length)
+        # tail_L already reflects space after boxes — no further subtraction needed.
+        rec_tail_L  = tail_L
         rec_y_base  = used_len + np_tail_length
 
         # ---- Tail zone (z = 0, ceiling = Hdoor_cm) -------------------
         tail_placements: List[Dict[str, Any]] = []
         tail_leftover = rec_tail_L
-        if rec_tail_L > gap_cm and all_tail_cands:
-            tail_placements, tail_leftover = _greedy_fill_2d(
+        if rec_tail_L > gap_cm and (pallet_cands or np_box_cands_global):
+            tail_placements, tail_leftover = _proportional_tail(
                 avail_L=rec_tail_L,
                 H_avail=Hdoor_cm,
-                candidates=all_tail_cands,
+                pallet_cands=pallet_cands,
+                np_box_cands=np_box_cands_global,
                 gap_cm=gap_cm,
+                leading_gap_cm=gap_cm,
+                order_qty_by_key=order_qty_by_key,
+                y_base=rec_y_base,
                 objective=objective,
                 secondary=secondary,
                 price_by_type=price_by_type,
-                leading_gap_cm=gap_cm,
-                y_base=rec_y_base,
-                z_base=0,
             )
             for p in tail_placements:
                 p["zone"] = "tail"

@@ -250,6 +250,10 @@ def run_pipeline(
             containers, np_boxes,
             W=CONTAINER_WIDTH_CM, Hdoor=Hdoor_cm, L=L_cm, Wmax_kg=Wmax_kg,
         )
+        # Update leftover_cm to reflect space consumed by NP boxes
+        for container in containers:
+            box_len = sum(z["length_cm"] for z in container.get("box_zones", []))
+            container["leftover_cm"] = max(0, container["leftover_cm"] - box_len)
 
     # ── 5) Fill recommendations ───────────────────────────────────────────────
     print("Computing recommendations...")
