@@ -52,18 +52,15 @@ def canonical_footprint(L: int, W: int, tol: int = 2) -> Optional[Tuple[int,int]
 
 # ---------- 2) Height band classification ----------
 def classify_height_band(h_cm: int) -> str:
-    """Return band label used in your table."""
+    """Return band label used in the block type table."""
     if h_cm == 230:
         return "230"
     if h_cm < 66:
         return "<66"
-    if 66 <= h_cm <= 89:
-        return "66-89"
-    if 89 < h_cm <= 130:
-        return "89-130"
-    # if outside known bands, still classify conservatively
     if h_cm <= 89:
-        return "<89"
+        return "66-89"
+    if h_cm <= 130:
+        return "89-130"
     return ">130"
 
 
@@ -90,26 +87,36 @@ def build_block_type_table(Hdoor_cm: int) -> Dict[str, BlockType]:
             allowed_lengths=tuple(sorted(set(lengths), reverse=True))
         )
 
-    # 115x115
-    add((115,115), "<66",   8, 4, 4*65,  allow_rotate=False)  # conservative: 4*65=260
-    add((115,115), "66-89", 6, 3, 3*89,  allow_rotate=False)  # 267
-    add((115,115), "89-130",4, 2, 2*130, allow_rotate=False)  # 260
-    add((115,115), "230",   2, 1, 230,   allow_rotate=False)  # one high (as per your table)
+    # ── 115×115  (floor(234/115) = 2 across) ──────────────────────────────
+    # 4 stacks × 2 across = 8 | 3×2=6 | 2×2=4 | 1×2=2
+    add((115,115), "<66",   8, 4, 4*65,  allow_rotate=False)
+    add((115,115), "66-89", 6, 3, 3*89,  allow_rotate=False)
+    add((115,115), "89-130",4, 2, 2*130, allow_rotate=False)
+    add((115,115), ">130",  2, 1, 230,   allow_rotate=False)  # single stack, too tall to double
+    add((115,115), "230",   2, 1, 230,   allow_rotate=False)
 
-    # 115x108 (rotation relevant if you allow rowLen=108)
+    # ── 115×108  (floor(234/115)=2 or floor(234/108)=2; both give 2 across) ─
     add((115,108), "<66",   8, 4, 4*65,  allow_rotate=True)
     add((115,108), "66-89", 6, 3, 3*89,  allow_rotate=True)
     add((115,108), "89-130",4, 2, 2*130, allow_rotate=True)
+    add((115,108), ">130",  2, 1, 230,   allow_rotate=True)
+    add((115,108), "230",   2, 1, 230,   allow_rotate=True)
 
-    # 115x77 (rotation relevant, big)
-    add((115,77),  "66-89", 6, 3, 3*89,  allow_rotate=True)
-    add((115,77),  "89-130",4, 2, 2*130, allow_rotate=True)
-    add((115,77),  ">130",  2, 1, 230,   allow_rotate=True)  # single layer, 2 across (too tall to stack under 250cm door)
+    # ── 115×77  (depth=77 → 115cm faces width → 2 across; depth=115 → 3 across)
+    # pallets_per_block fixed at the 2-across orientation for conservative counting
+    add((115,77),  "<66",   8, 4, 4*65,  allow_rotate=True)  # 4 stacks × 2 across
+    add((115,77),  "66-89", 6, 3, 3*89,  allow_rotate=True)  # 3 stacks × 2 across
+    add((115,77),  "89-130",4, 2, 2*130, allow_rotate=True)  # 2 stacks × 2 across
+    add((115,77),  ">130",  2, 1, 230,   allow_rotate=True)  # 1 stack  × 2 across
+    add((115,77),  "230",   2, 1, 230,   allow_rotate=True)
 
-    # 77x77
-    # Your corrected logic: <89 => 9 pallets per block (3-high, 3 across), 89-130 => 6 (2-high, 3 across)
-    add((77,77),   "<89",   9, 3, 3*89,  allow_rotate=False)  # 267
-    add((77,77),   "89-130",6, 2, 2*130, allow_rotate=False)  # 260
+    # ── 77×77  (floor(234/77) = 3 across) ──────────────────────────────────
+    # 3 stacks × 3 across = 9 | 2×3=6 | 1×3=3
+    add((77,77), "<66",   9, 3, 3*89,  allow_rotate=False)   # same stack count as 66-89
+    add((77,77), "66-89", 9, 3, 3*89,  allow_rotate=False)
+    add((77,77), "89-130",6, 2, 2*130, allow_rotate=False)
+    add((77,77), ">130",  3, 1, 230,   allow_rotate=False)
+    add((77,77), "230",   3, 1, 230,   allow_rotate=False)
 
     return table
 

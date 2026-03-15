@@ -66,8 +66,18 @@ def build_boxes_from_row_blocks(container_rows, container_width_cm):
 # NP box zone helpers
 # ------------------------------------------------------------
 
-# Distinct warm colours for box zones (different palette from pallets)
-_BOX_ZONE_FILL_COLORS = ["khaki", "lightcyan", "palegreen", "thistle", "peachpuff"]
+# Per-label colour palette for NP box strips (distinct from pallet colours)
+_BOX_LABEL_PALETTE = [
+    "#E6834A", "#4A90E6", "#7DB361", "#C15CBA", "#E6C84A",
+    "#5CBAC1", "#BA5C5C", "#8C5CBA", "#5CBA8C", "#BA8C5C",
+]
+# Legacy alias kept so nothing else breaks
+_BOX_ZONE_FILL_COLORS = _BOX_LABEL_PALETTE
+
+
+def _label_color(label: str) -> str:
+    """Return a consistent hex colour for a given box label."""
+    return _BOX_LABEL_PALETTE[hash(label) % len(_BOX_LABEL_PALETTE)]
 
 
 def _draw_box_wireframe(
@@ -108,74 +118,113 @@ def build_box_zone_visuals(
     container_box_zones: Optional[List[Dict[str, Any]]],
 ) -> List[Dict[str, Any]]:
     """
-    Convert container['box_zones'] into renderable dicts for plot_boxes_3d().
+    Convert container['box_zones'] into renderable strip dicts for plot_boxes_3d().
 
-    Each returned dict has:
-      x, y, z, w, l, h_fill   — filled-volume cuboid (volume-equivalent height)
-      h_zone                   — full available zone height (for the wireframe outline)
-      color, zone_type, n_boxes, label, legend_line
+    When the zone contains column-based packing data ('columns' key, produced by
+    BoxPacker), each height-strip within each column is returned as a separate
+    visual with concrete (x, y, z, w, l, h) dimensions.  Different box labels
+    get distinct colours.
+
+    Falls back to a single volume-equivalent slab for legacy zones without
+    'columns' data.
+
+    Each returned dict has keys understood by the updated plot_boxes_3d():
+      x, y, z, w, l, h  — concrete dimensions (cm)
+      color              — hex fill colour
+      label              — short text label drawn on the strip
+      n_boxes            — number of boxes in this strip
+      legend_line        — text for the figure legend
     """
     if not container_box_zones:
         return []
 
+    def _short(s, n=22):
+        return s if len(s) <= n else s[:n - 1] + "…"
+
     visuals = []
-    for zi, zone in enumerate(container_box_zones):
-        zone_L = zone["length_cm"]
-        zone_W = zone["width_cm"]
+
+    for zone in container_box_zones:
+        zone_y   = zone["y_start_cm"]
+        zone_z   = zone["z_base_cm"]
+        zone_W   = zone["width_cm"]
         vol_used = zone.get("volume_used_cm3", 0.0)
-        zone_H_max = zone["height_cm"]
+        wt_kg    = zone.get("total_weight_kg", 0.0)
+        n_total  = sum(p["quantity"] for p in zone.get("placed", []))
 
-        # zone_L is now the actual length used by placed boxes (from the length cursor),
-        # so render the zone at that size. Fill height = vol / (length × width).
-        dense_length = max(1, zone_L)
-        footprint = dense_length * zone_W
-        h_fill = (vol_used / footprint) if footprint > 0 else 0.0
-        h_fill = min(h_fill, zone_H_max)
-
-        n_boxes = sum(p["quantity"] for p in zone.get("placed", []))
-        wt_kg   = zone.get("total_weight_kg", 0.0)
-        vol_m3  = vol_used / 1e6
-
-        # Build "product name (LxWxHcm)" summary — group by product name
-        name_info: dict = {}  # name -> {"dim": str, "count": int}
+        # ── Build aggregate legend entry for the whole zone ───────────────
+        name_counts: dict = {}
         for p in zone.get("placed", []):
-            nm  = p["label"]
-            dim = f"{p['length_cm']}×{p['width_cm']}×{p['height_cm']}cm"
-            if nm not in name_info:
-                name_info[nm] = {"dim": dim, "count": 0}
-            name_info[nm]["count"] += p["quantity"]
+            nm = p["label"]
+            name_counts[nm] = name_counts.get(nm, 0) + p["quantity"]
 
-        def _short(s, n=20):
-            return s if len(s) <= n else s[:n - 1] + "…"
-
-        legend_parts = [
-            f"{v['count']}× {_short(nm)} ({v['dim']})"
-            for nm, v in list(name_info.items())[:2]
+        leg_parts = [
+            f"{cnt}× {_short(nm)}" for nm, cnt in list(name_counts.items())[:3]
         ]
-        if len(name_info) > 2:
-            legend_parts.append(f"+{len(name_info) - 2} more")
-        dim_summary  = ", ".join(legend_parts)
-        label_short  = dim_summary or f"{n_boxes} boxes"
+        if len(name_counts) > 3:
+            leg_parts.append(f"+{len(name_counts) - 3} more")
+        leg_summary = ", ".join(leg_parts)
 
-        visuals.append({
-            "x":        0,
-            "y":        zone["y_start_cm"],
-            "z":        zone["z_base_cm"],
-            "w":        zone_W,
-            "l":        dense_length,
-            "h_fill":   h_fill,
-            "h_zone":   zone_H_max,
-            "color":    _BOX_ZONE_FILL_COLORS[zi % len(_BOX_ZONE_FILL_COLORS)],
-            "zone_type": zone["zone_type"],
-            "n_boxes":  n_boxes,
-            "label":    label_short,
-            "legend_line": (
-                f"  NP ({zone['zone_type']}): {n_boxes} boxes | "
-                f"{vol_m3:.3f} m³"
-                + (f" | {wt_kg:.0f} kg" if wt_kg else "")
-                + f" | {dim_summary}"
-            ),
-        })
+        zone_legend = (
+            f"  NP (tail): {n_total} boxes | {vol_used/1e6:.3f} m³"
+            + (f" | {wt_kg:.0f} kg" if wt_kg else "")
+            + (f" | {leg_summary}" if leg_summary else "")
+        )
+
+        if "columns" in zone and zone["columns"]:
+            # ── Column-based packing: one visual per strip ────────────────
+            for col in zone["columns"]:
+                col_y = zone_y + col["y_start_cm"]
+                col_D = col["depth_cm"]
+                for strip in col["strips"]:
+                    label  = strip["label"]
+                    color  = _label_color(label)
+                    h      = strip["h_used_cm"]
+                    z_abs  = zone_z + strip["z_start_cm"]
+                    qty    = strip["quantity"]
+                    dims   = f"{strip['bl']}×{strip['bw']}×{strip['bh']}cm"
+                    visuals.append({
+                        "x":           0,
+                        "y":           col_y,
+                        "z":           z_abs,
+                        "w":           zone_W,
+                        "l":           col_D,
+                        "h":           h,
+                        "color":       color,
+                        "label":       f"×{qty}",
+                        "label_full":  _short(label),
+                        "n_boxes":     qty,
+                        "dims":        dims,
+                        "legend_line": zone_legend,
+                        "_zone_legend_emitted": False,
+                    })
+        else:
+            # ── Legacy fallback: single volume-equivalent slab ────────────
+            zone_L   = max(1, zone.get("length_cm", 1))
+            h_fill   = min(vol_used / (zone_L * zone_W), zone["height_cm"]) if zone_W > 0 else 0.0
+            if h_fill > 0.5:
+                visuals.append({
+                    "x":           0,
+                    "y":           zone_y,
+                    "z":           zone_z,
+                    "w":           zone_W,
+                    "l":           zone_L,
+                    "h":           h_fill,
+                    "color":       _BOX_LABEL_PALETTE[0],
+                    "label":       f"×{n_total}",
+                    "label_full":  "NP boxes",
+                    "n_boxes":     n_total,
+                    "dims":        "",
+                    "legend_line": zone_legend,
+                    "_zone_legend_emitted": False,
+                })
+
+    # Mark only the first visual per unique legend_line so we don't repeat it
+    seen_legend: set = set()
+    for v in visuals:
+        ll = v["legend_line"]
+        v["_zone_legend_emitted"] = ll in seen_legend
+        seen_legend.add(ll)
+
     return visuals
 
 
@@ -288,29 +337,25 @@ def plot_boxes_3d(W, L, H, boxes, box_zone_visuals=None, rec_box_visuals=None, t
 
         ax.text(cx, cy, cz, str(b["id"]), color="k", fontsize=9, ha="center")
 
-    # --- NP box zones ---
+    # --- NP box strips (column-based packing) ---
     if box_zone_visuals:
         for bz in box_zone_visuals:
             x, y, z = bz["x"], bz["y"], bz["z"]
-            w, l    = bz["w"], bz["l"]
-            h_fill  = bz["h_fill"]
+            w, l, h = bz["w"], bz["l"], bz["h"]
 
-            # Draw actual box volume only (volume-equivalent height bar)
-            if h_fill > 0.5:
-                ax.bar3d(x, y, z, w, l, h_fill,
-                         alpha=0.55, color=bz["color"],
-                         edgecolor="darkorange", linewidth=0.8, shade=True)
-            else:
-                # Nearly nothing placed — just draw a thin marker line
-                _draw_box_wireframe(ax, x, y, z, w, l, 2,
-                                    color="darkorange", linestyle="--", linewidth=0.8)
-
-            # Label just above the bar
-            label_z = z + max(h_fill, 3) + 2
-            ax.text(x + w / 2, y + l / 2, label_z,
-                    f"NP ×{bz['n_boxes']}\n({bz['zone_type']})",
-                    color="darkorange", fontsize=7,
-                    ha="center", va="bottom", fontweight="bold")
+            # Translucent fill
+            ax.bar3d(x, y, z, w, l, h,
+                     alpha=0.60, color=bz["color"],
+                     edgecolor="none", shade=True)
+            # Solid wireframe outline so individual strips are clearly visible
+            _draw_box_wireframe(ax, x, y, z, w, l, h,
+                                color="darkorange", linestyle="-", linewidth=0.7,
+                                alpha=0.9)
+            # Small quantity label centred on the strip face
+            ax.text(x + w / 2, y + l / 2, z + h / 2,
+                    bz["label"],
+                    color="k", fontsize=6,
+                    ha="center", va="center", fontweight="bold")
 
     # --- Recommended additions ---
     if rec_box_visuals:
@@ -361,11 +406,12 @@ def plot_boxes_3d(W, L, H, boxes, box_zone_visuals=None, rec_box_visuals=None, t
         )
         legend_lines.append(line)
 
-    # Append NP box zone legend entries
+    # Append NP box zone legend entries (one line per unique zone, not per strip)
     if box_zone_visuals:
-        legend_lines.append("")  # blank separator
+        legend_lines.append("")
         for bz in box_zone_visuals:
-            legend_lines.append(bz["legend_line"])
+            if not bz.get("_zone_legend_emitted", True):
+                legend_lines.append(bz["legend_line"])
 
     # Append recommended block legend entries
     if rec_box_visuals:

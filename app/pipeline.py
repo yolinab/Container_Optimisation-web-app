@@ -5,7 +5,6 @@ Called by api.py.  No matplotlib dependency.
 
 from typing import List, Dict, Any
 from pathlib import Path
-import math
 
 from utils.parse_xlsx import parse_pallet_excel_v3, parse_np_boxes_excel_v3
 from utils.oneDbuildblocks import build_row_blocks_from_pallets
@@ -49,149 +48,50 @@ def assign_boxes_to_containers(
     Hdoor: int,
     L: int,
     Wmax_kg: int,
-    H_container: int = None,
 ) -> List[Dict[str, Any]]:
     """
-    Volume-arithmetic box packing into tail and atop zones.
+    Column-based geometric box packing into the tail zone only.
 
-    Rules:
-    - A box fits in a zone if its minimum dimension <= zone height.
-    - Pure volume budget: fit = floor(vol_budget / box_vol).  No geometric grid cap.
-    - Pool sorted by unit volume descending for better greedy utilization.
-    - Atop zones (headroom above pallet rows) are filled after the tail zone.
+    Boxes may NOT be placed on top of pallets.  Delegates to BoxPacker which
+    fills the W×H cross-section with multiple box types per column before
+    advancing the length cursor — eliminating the one-section-per-type waste.
+
+    Modifies containers in-place.  Returns unplaced boxes.
     """
-    if H_container is None:
-        H_container = Hdoor
+    from models.box_packing import BoxPacker
 
-    # Largest boxes first — fills space more efficiently
     pool: List[list] = sorted(
-        [[dict(b), b["quantity"]] for b in np_boxes],
+        [[dict(b), int(b["quantity"])] for b in np_boxes],
         key=lambda e: e[0]["length_cm"] * e[0]["width_cm"] * e[0]["height_cm"],
         reverse=True,
     )
-
-    def _fill_zone(zone_L, zone_W, zone_H, weight_budget):
-        """
-        Geometric grid-based stacking along zone_L with a length cursor.
-        Returns (placed, vol_cm3, wt_kg, actual_length_used).
-        """
-        length_cursor = 0
-        w_budget = float(weight_budget)
-        placed = []
-
-        for entry in pool:
-            box, qty_left = entry
-            if qty_left <= 0 or length_cursor >= zone_L:
-                continue
-
-            remaining_L = zone_L - length_cursor
-            bL, bW, bH = box["length_cm"], box["width_cm"], box["height_cm"]
-
-            best_fit = 0
-            best_bl = best_bw = best_bh = best_per_layer = 0
-            for bl, bw, bh in [
-                (bL, bW, bH), (bL, bH, bW),
-                (bW, bL, bH), (bW, bH, bL),
-                (bH, bL, bW), (bH, bW, bL),
-            ]:
-                if bl <= 0 or bw <= 0 or bh <= 0 or bh > zone_H or bw > zone_W:
-                    continue
-                n_w = zone_W // bw
-                n_h = zone_H // bh
-                if n_w == 0 or n_h == 0:
-                    continue
-                per_layer = n_w * n_h
-                fit = min(qty_left, (remaining_L // bl) * per_layer)
-                if fit > best_fit:
-                    best_fit, best_bl, best_bw, best_bh, best_per_layer = (
-                        fit, bl, bw, bh, per_layer
-                    )
-
-            if best_fit <= 0:
-                continue
-
-            if box.get("weight_kg") and box["weight_kg"] > 0:
-                best_fit = min(best_fit, int(w_budget // box["weight_kg"]))
-            if best_fit <= 0:
-                continue
-
-            layers_used   = math.ceil(best_fit / best_per_layer)
-            len_used      = layers_used * best_bl
-            wt_used       = (box.get("weight_kg") or 0.0) * best_fit
-            vol_used      = best_bl * best_bw * best_bh * best_fit
-
-            entry[1]      -= best_fit
-            length_cursor += len_used
-            w_budget      -= wt_used
-
-            placed.append({
-                "label":            box["label"],
-                "length_cm":        best_bl,
-                "width_cm":         best_bw,
-                "height_cm":        best_bh,
-                "quantity":         best_fit,
-                "weight_kg_total":  wt_used,
-                "volume_cm3_total": vol_used,
-            })
-
-        return (
-            placed,
-            sum(p["volume_cm3_total"] for p in placed),
-            sum(p["weight_kg_total"]  for p in placed),
-            length_cursor,
-        )
+    packer = BoxPacker()
 
     for container in containers:
         container["box_zones"] = []
         weight_budget = float(Wmax_kg) - float(container.get("loaded_weight", 0))
 
-        # ── Tail zone ──────────────────────────────────────────────────────────
         tail_L = L - int(container.get("used_length_cm", 0))
-        if tail_L > 0 and any(entry[1] > 0 for entry in pool):
-            placed, vol_used, wt_used, actual_L = _fill_zone(
-                tail_L, W, Hdoor, weight_budget
+        if tail_L > 0 and any(e[1] > 0 for e in pool):
+            placed, columns, vol_cm3, wt_kg, length_used = packer.pack(
+                tail_L, W, Hdoor, pool, weight_budget
             )
-            weight_budget -= wt_used
-            container["loaded_weight"] = container.get("loaded_weight", 0) + wt_used
+            container["loaded_weight"] = container.get("loaded_weight", 0) + wt_kg
             if placed:
                 container["box_zones"].append({
                     "zone_type":       "tail",
                     "y_start_cm":      int(container.get("used_length_cm", 0)),
                     "z_base_cm":       0,
-                    "length_cm":       actual_L,
+                    "length_cm":       length_used,
                     "width_cm":        W,
                     "height_cm":       Hdoor,
-                    "volume_used_cm3": vol_used,
+                    "volume_used_cm3": vol_cm3,
                     "placed":          placed,
-                    "total_weight_kg": wt_used,
+                    "columns":         columns,
+                    "total_weight_kg": wt_kg,
                 })
 
-        # ── Atop zones (headroom above each pallet row) ────────────────────────
-        for row in container.get("rows", []):
-            if not any(entry[1] > 0 for entry in pool):
-                break
-            headroom = H_container - row["height_cm"]
-            if headroom < 20:
-                continue
-            placed, vol_used, wt_used, actual_L = _fill_zone(
-                row["length_cm"], W, headroom, weight_budget
-            )
-            weight_budget -= wt_used
-            container["loaded_weight"] = container.get("loaded_weight", 0) + wt_used
-            if placed:
-                container["box_zones"].append({
-                    "zone_type":       "atop",
-                    "y_start_cm":      row["y_start_cm"],
-                    "z_base_cm":       row["height_cm"],
-                    "length_cm":       actual_L,
-                    "width_cm":        W,
-                    "height_cm":       headroom,
-                    "volume_used_cm3": vol_used,
-                    "placed":          placed,
-                    "total_weight_kg": wt_used,
-                })
-
-    return [{"box": entry[0], "remaining_qty": entry[1]} for entry in pool if entry[1] > 0]
+    return [{"box": e[0], "remaining_qty": e[1]} for e in pool if e[1] > 0]
 
 
 def run_pipeline(
@@ -349,7 +249,6 @@ def run_pipeline(
         unplaced = assign_boxes_to_containers(
             containers, np_boxes,
             W=CONTAINER_WIDTH_CM, Hdoor=Hdoor_cm, L=L_cm, Wmax_kg=Wmax_kg,
-            H_container=CONTAINER_HEIGHT_CM,
         )
 
     # ── 5) Fill recommendations ───────────────────────────────────────────────

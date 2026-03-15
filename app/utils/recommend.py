@@ -346,29 +346,31 @@ def recommend_fill_containers(
         # NP boxes go in the tail only — never on top of pallets.
         all_tail_cands = pallet_cands + np_box_cands_global
 
-        # Identify zones already filled by NP box assignment (step 7).
-        # Recommendations must not overlap with existing NP box placements.
+        # ── Account for NP boxes already placed in the tail ─────────────────
+        # Boxes are packed tail-only (no atop). Measure how much tail they consumed
+        # so recommendations start past the box zone, not on top of it.
         box_zones = container.get("box_zones", [])
-        atop_covered_y = {
-            z["y_start_cm"]
-            for z in box_zones if z.get("zone_type") == "atop"
-        }
-        tail_has_np = any(z.get("zone_type") == "tail" for z in box_zones)
+        np_tail_length = sum(
+            z["length_cm"] for z in box_zones if z.get("zone_type") == "tail"
+        )
+        # Remaining tail available for pallet recommendations
+        rec_tail_L  = max(0, tail_L - np_tail_length)
+        rec_y_base  = used_len + np_tail_length
 
         # ---- Tail zone (z = 0, ceiling = Hdoor_cm) -------------------
         tail_placements: List[Dict[str, Any]] = []
-        tail_leftover = tail_L
-        if tail_L > gap_cm and all_tail_cands and not tail_has_np:
+        tail_leftover = rec_tail_L
+        if rec_tail_L > gap_cm and all_tail_cands:
             tail_placements, tail_leftover = _greedy_fill_2d(
-                avail_L=tail_L,
-                H_avail=Hdoor_cm,          # full door height available from z=0
+                avail_L=rec_tail_L,
+                H_avail=Hdoor_cm,
                 candidates=all_tail_cands,
                 gap_cm=gap_cm,
                 objective=objective,
                 secondary=secondary,
                 price_by_type=price_by_type,
-                leading_gap_cm=gap_cm,     # gap after last existing pallet row
-                y_base=used_len,
+                leading_gap_cm=gap_cm,
+                y_base=rec_y_base,
                 z_base=0,
             )
             for p in tail_placements:
@@ -382,10 +384,6 @@ def recommend_fill_containers(
             row_h = int(row["height_cm"])
             row_L = int(row["length_cm"])
             row_y = int(row["y_start_cm"])
-
-            # Skip rows whose headroom is already occupied by NP box zones
-            if row_y in atop_covered_y:
-                continue
 
             # Door is the binding ceiling: combined height z + h ≤ Hdoor
             avail_h = Hdoor_cm - row_h
@@ -422,11 +420,12 @@ def recommend_fill_containers(
         results.append({
             "container_index":       container["container_index"],
             "used_length_cm":        used_len,
-            "leftover_before_cm":    tail_L,
+            "np_tail_length_cm":     np_tail_length,
+            "leftover_before_cm":    rec_tail_L,
             "leftover_after_cm":     tail_leftover,
             "fill_rate_pct": (
-                round(100.0 * (tail_L - tail_leftover) / tail_L, 1)
-                if tail_L > 0 else 100.0
+                round(100.0 * (rec_tail_L - tail_leftover) / rec_tail_L, 1)
+                if rec_tail_L > 0 else 100.0
             ),
             "tail_placements":       tail_placements,
             "atop_placements":       atop_placements,
