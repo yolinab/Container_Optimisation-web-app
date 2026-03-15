@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>FAQ &mdash; Container Packing Optimizer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:     #F5F4F1;
+      --white:  #FFFFFF;
+      --ink:    #0F0F0F;
+      --mid:    #5C5C5C;
+      --light:  #9A9A9A;
+      --border: #E0DDD8;
+    }
+
+    html, body { height: 100%; }
+
+    body {
+      font-family: "Inter", -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+      font-size: 14px;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Nav ── */
+    nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 2rem;
+      height: 52px;
+      background: var(--white);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .nav-wordmark {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--ink);
+      letter-spacing: -0.01em;
+    }
+
+    .nav-links a {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.42rem 0.85rem;
+      background: var(--ink);
+      color: #FFFFFF;
+      font-size: 13px;
+      font-weight: 600;
+      text-decoration: none;
+      border-radius: 6px;
+      transition: background 0.12s;
+      letter-spacing: 0.01em;
+    }
+    .nav-links a:hover { background: #2A2A2A; color: #FFFFFF; }
+
+    /* ── Main ── */
+    main {
+      flex: 1;
+      padding: 3rem 1.5rem 4rem;
+    }
+
+    .faq-wrap {
+      max-width: 660px;
+      margin: 0 auto;
+    }
+
+    .page-title {
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      margin-bottom: 0.35rem;
+    }
+
+    .page-sub {
+      font-size: 13px;
+      color: var(--mid);
+      margin-bottom: 2.5rem;
+      line-height: 1.5;
+    }
+
+    /* ── Section ── */
+    .faq-section {
+      margin-bottom: 2.5rem;
+    }
+
+    .section-label {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--light);
+      margin-bottom: 0.75rem;
+      padding-bottom: 0.5rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    /* ── Accordion ── */
+    .faq-item {
+      border-bottom: 1px solid var(--border);
+    }
+
+    .faq-q {
+      width: 100%;
+      background: none;
+      border: none;
+      padding: 0.9rem 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      font-size: 13.5px;
+      font-weight: 600;
+      color: var(--ink);
+      text-align: left;
+      gap: 1rem;
+      font-family: inherit;
+      transition: color 0.1s;
+    }
+    .faq-q:hover { color: #333; }
+
+    .faq-icon {
+      flex-shrink: 0;
+      font-size: 18px;
+      font-weight: 300;
+      color: var(--light);
+      line-height: 1;
+      transition: transform 0.18s, color 0.15s;
+      user-select: none;
+    }
+    .faq-item.open .faq-icon {
+      transform: rotate(45deg);
+      color: var(--ink);
+    }
+
+    .faq-a {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.26s ease;
+    }
+    .faq-item.open .faq-a { max-height: 800px; }
+
+    .faq-a-inner {
+      padding: 0 0 1.1rem 0;
+      font-size: 13px;
+      color: var(--mid);
+      line-height: 1.7;
+    }
+
+    .faq-a-inner p { margin-bottom: 0.6rem; }
+    .faq-a-inner p:last-child { margin-bottom: 0; }
+    .faq-a-inner ul,
+    .faq-a-inner ol { padding-left: 1.1rem; margin-bottom: 0.5rem; }
+    .faq-a-inner li { margin-bottom: 0.35rem; }
+    .faq-a-inner strong { color: var(--ink); }
+    .faq-a-inner code {
+      background: #ECEAE5;
+      border-radius: 3px;
+      padding: 0.1em 0.3em;
+      font-size: 12px;
+      font-family: "SF Mono", "Fira Code", monospace;
+      color: var(--ink);
+    }
+
+    /* ── Footer ── */
+    footer {
+      text-align: center;
+      padding: 1.25rem;
+      font-size: 12px;
+      color: var(--light);
+      border-top: 1px solid var(--border);
+    }
+  </style>
+</head>
+<body>
+
+  <nav>
+    <span class="nav-wordmark">Container Packing Optimizer</span>
+    <div class="nav-links">
+      <a href="/">&larr; Back to tool</a>
+    </div>
+  </nav>
+
+  <main>
+    <div class="faq-wrap">
+      <h1 class="page-title">Frequently Asked Questions</h1>
+      <p class="page-sub">How to use the tool, how it works, and solutions to common problems.</p>
+
+      <!-- Section 1 -->
+      <div class="faq-section">
+        <div class="section-label">How to use</div>
+
+        <div class="faq-item">
+          <button class="faq-q" aria-expanded="false">
+            <span>What file format is required?</span>
+            <span class="faq-icon">+</span>
+          </button>
+          <div class="faq-a"><div class="faq-a-inner">
+            <p>Your order file must be in Excel format &mdash; <strong>.xlsx</strong> or <strong>.xls</strong>. CSV files are not supported.</p>
+            <p>The file should contain at minimum: product descriptions, pallet dimensions (length, width, height in cm), and an order quantity column. Weight data is optional but enables the per-container weight limit check.</p>
+          </div></div>
+        </div>
+
+        <div class="faq-item">
+          <button class="faq-q" aria-expanded="false">
+            <span>Step-by-step: running the optimizer</span>
+            <span class="faq-icon">+</span>
+          </button>
+          <div class="faq-a"><div class="faq-a-inner">
+            <ol>
+              <li><strong>Choose file</strong> &mdash; click the file field and select your order spreadsheet.</li>
+              <li><strong>Quantity column</strong> &mdash; leave blank to use auto-detection. If results look wrong, enter the exact column header from your spreadsheet (e.g. <code>External Packaging Quantity</code>).</li>
+              <li><strong>Run</strong> &mdash; click Run Optimizer. Processing typically takes 10&ndash;60 seconds. The first request after a period of inactivity may take up to 50 seconds to start the server.</li>
+              <li><strong>Review</strong> &mdash; any warnings or issues appear directly on the page after the run completes.</li>
+              <li><strong>Download</strong> &mdash; click Download Packing Report to get the full Excel file with layout diagrams, container details, and fill recommendations.</li>
+            </ol>
+          </div></div>
+        </div>
+
+        <div class="faq-item">
+          <button class="faq-q" aria-expanded="false">
+            <span>What does the Excel report contain?</span>
+            <span class="faq-icon">+</span>
+          </button>
+          <div class="faq-a"><div class="faq-a-inner">
+            <p>The report has four sheets:</p>
+            <ul>
+              <li><strong>Overview</strong> &mdash; key metrics and a per-container fill chart.</li>
+              <li><strong>Container Details</strong> &mdash; every pallet row and NP box placement per container, sorted by position, with dimensions, weight, and Y-start values.</li>
+              <li><strong>Packing Layout</strong> &mdash; a colour-coded grid showing the physical layout of each container. Pallets and NP boxes appear on the same row at their correct positions. A green sub-row shows recommended additions.</li>
+              <li><strong>Recommendations</strong> &mdash; additional items from your order that could be loaded into remaining free space, split by pallets and NP boxes per container.</li>
+            </ul>
+          </div></div>
+        </div>
+      </div>
+
+      <!-- Section 2 -->
+      <div class="faq-section">
+        <div class="section-label">How it works</div>
+
+        <div class="faq-item">
+          <button class="faq-q" aria-expanded="false">
+            <span>How are pallets packed into containers?</span>
+            <span class="faq-icon">+</span>
+          </button>
+          <div class="faq-a"><div class="faq-a-inner">
+            <p>Pallets are grouped by footprint and height into <strong>row blocks</strong>. Recognised footprints are 115&times;115 cm, 115&times;108 cm, 115&times;77 cm, and 77&times;77 cm (&plusmn;2 cm tolerance). Heights are mapped to bands: &lt;66 cm, 66&ndash;89 cm, 89&ndash;130 cm, &gt;130 cm.</p>
+            <p>Row blocks are packed into containers using <strong>OR-Tools CP-SAT</strong>, a constraint programming solver. Tall blocks are loaded from the rear. Only the final (door-side) row must fit within the door height of 250 cm; all other rows may be taller.</p>
+          </div></div>
+        </div>
+
+        <div class="faq-item">
+          <button class="faq-q" aria-expanded="false">
+            <span>How are loose NP boxes handled?</span>
+            <span class="faq-icon">+</span>
+          </button>
+          <div class="faq-a"><div class="faq-a-inner">
+            <p>NP (non-palletised) boxes fill the <strong>tail zone</strong> &mdash; the unused container length after the last pallet row. A column-based geometric algorithm stacks boxes across the full container width (235 cm) and up to door height, sharing columns across box types to avoid wasted gaps between sections.</p>
+            <p>NP boxes are never placed on top of pallets, keeping the loading sequence safe and straightforward.</p>
+          </div></div>
+        </div>
+
+        <div class="faq-item">
+          <button class="faq-q" aria-expanded="false">
+            <span>How do fill recommendations work?</span>
+            <span class="faq-icon">+</span>
+          </button>
+          <div class="faq-a"><div class="faq-a-inner">
+            <p>After packing, the engine examines remaining free space in each container and suggests additional items from your current order. Two zones are analysed:</p>
+            <ul>
+              <li><strong>Tail zone</strong> &mdash; unused length after the last pallet row. Space is allocated proportionally across pallet types based on their order quantities. Remaining length after pallets is filled with NP boxes stacked to door height.</li>
+              <li><strong>Atop zone</strong> &mdash; headroom above each placed pallet row (up to the door height). Pallet blocks only &mdash; boxes cannot be placed above pallets.</li>
+            </ul>
+            <p>Containers that are already optimally packed show the remaining empty space with an explanation of why nothing more can be added from the current order.</p>
+          </div></div>
+        </div>
+
+        <div class="faq-item">
+          <button class="faq-q" aria-expanded="false">
+            <span>What container dimensions are used?</span>
+            <span class="faq-icon">+</span>
+          </button>
+          <div class="faq-a"><div class="faq-a-inner">
+            <p>Default dimensions: <strong>1203 &times; 235 &times; 270 cm</strong> (length &times; width &times; height). Door opening height: <strong>250 cm</strong>. Max payload weight: <strong>18,000 kg</strong>. A 5 cm gap is reserved between pallet rows for fork-lift clearance.</p>
+            <p>These can be adjusted via environment variables on the server (<code>CONTAINER_LENGTH_CM</code>, <code>CONTAINER_WIDTH_CM</code>, etc.).</p>
+          </div></div>
+        </div>
+      </div>
+
+      <!-- Section 3 -->
+      <div class="faq-section">
+        <div class="section-label">Common issues</div>
+
+        <div class="faq-item">
+          <button class="faq-q" aria-expanded="false">
+            <span>My file is being rejected</span>
+            <span class="faq-icon">+</span>
+          </button>
+          <div class="faq-a"><div class="faq-a-inner">
+            <p>Only <strong>.xlsx</strong> and <strong>.xls</strong> files are accepted. If you are working from a CSV or Google Sheet, export it as Excel first: <em>File &rarr; Download &rarr; Microsoft Excel (.xlsx)</em>.</p>
+          </div></div>
+        </div>
+
+        <div class="faq-item">
+          <button class="faq-q" aria-expanded="false">
+            <span>The pallet or container count looks wrong</span>
+            <span class="faq-icon">+</span>
+          </button>
+          <div class="faq-a"><div class="faq-a-inner">
+            <p>Pallets with footprints outside the recognised sizes (115&times;115, 115&times;108, 115&times;77, 77&times;77 cm &plusmn;2 cm) are skipped. A warning will appear on screen if this happens.</p>
+            <p>If the container count is higher or lower than expected, check the <strong>Packing Layout</strong> sheet to inspect fill patterns. Unexpectedly low fill on early containers often indicates a dimension mismatch or an order with very few items of a particular pallet type.</p>
+          </div></div>
+        </div>
+
+        <div class="faq-item">
+          <button class="faq-q" aria-expanded="false">
+            <span>"Order quantity column not found" or wrong quantity used</span>
+            <span class="faq-icon">+</span>
+          </button>
+          <div class="faq-a"><div class="faq-a-inner">
+            <p>Auto-detection scans for common column names. If it selects the wrong column, enter the exact header text in the <strong>Quantity column</strong> field on the main page &mdash; including any spaces and capitalisation exactly as they appear in your spreadsheet.</p>
+            <p>Example: if your column is <code>External Packaging Quantity</code>, type that exactly.</p>
+          </div></div>
+        </div>
+
+        <div class="faq-item">
+          <button class="faq-q" aria-expanded="false">
+            <span>All weights show 0 kg</span>
+            <span class="faq-icon">+</span>
+          </button>
+          <div class="faq-a"><div class="faq-a-inner">
+            <p>Weight data is absent from your Excel file. The optimizer still runs correctly &mdash; packing and recommendations are unaffected &mdash; but the 18,000 kg per-container weight limit check is inactive. A notice will appear on the results page.</p>
+            <p>To enable weight checks, ensure your spreadsheet includes a weight column (kg per pallet).</p>
+          </div></div>
+        </div>
+
+        <div class="faq-item">
+          <button class="faq-q" aria-expanded="false">
+            <span>The optimizer is taking a very long time</span>
+            <span class="faq-icon">+</span>
+          </button>
+          <div class="faq-a"><div class="faq-a-inner">
+            <p>Two things can cause this:</p>
+            <ul>
+              <li><strong>Cold start</strong> &mdash; the hosting service pauses after inactivity. The first request after a pause can take up to 50 seconds before the optimizer begins. Subsequent runs in the same session are fast.</li>
+              <li><strong>Large or complex order</strong> &mdash; the solver runs up to 5 seconds per container. A 10-container order may take close to a minute. This is expected.</li>
+            </ul>
+          </div></div>
+        </div>
+
+        <div class="faq-item">
+          <button class="faq-q" aria-expanded="false">
+            <span>Results look incorrect or unexpected</span>
+            <span class="faq-icon">+</span>
+          </button>
+          <div class="faq-a"><div class="faq-a-inner">
+            <p>Use the <strong>Report a bug</strong> link at the bottom of the main page. Your message will be sent with the run summary and any warnings attached automatically &mdash; no need to copy-paste anything.</p>
+          </div></div>
+        </div>
+
+      </div>
+    </div>
+  </main>
+
+  <footer>Container Packing Optimizer &mdash; Edelman</footer>
+
+  <script>
+    document.querySelectorAll(".faq-q").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const item   = btn.closest(".faq-item");
+        const isOpen = item.classList.contains("open");
+        item.closest(".faq-section").querySelectorAll(".faq-item").forEach(i => {
+          i.classList.remove("open");
+          i.querySelector(".faq-q").setAttribute("aria-expanded", "false");
+        });
+        if (!isOpen) {
+          item.classList.add("open");
+          btn.setAttribute("aria-expanded", "true");
+        }
+      });
+    });
+  </script>
+</body>
+</html>

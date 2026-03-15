@@ -4,293 +4,631 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Container Packing Optimizer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+    :root {
+      --bg:       #F5F4F1;
+      --white:    #FFFFFF;
+      --ink:      #0F0F0F;
+      --mid:      #5C5C5C;
+      --light:    #9A9A9A;
+      --border:   #E0DDD8;
+      --focus:    #0F0F0F;
+      --green:    #145C35;
+      --green-h:  #0E4226;
+      --err-bg:   #FDF0F0;
+      --err-text: #7A1C1C;
+      --err-br:   #F0C0C0;
+      --warn-bg:  #FDF8EC;
+      --warn-text:#6A4500;
+      --warn-br:  #E8D070;
+      --ok-bg:    #EDF7F1;
+      --ok-text:  #145C35;
+      --ok-br:    #A8D8BA;
+    }
+
+    html, body { height: 100%; }
+
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #f0f4f8;
-      color: #1a202c;
+      font-family: "Inter", -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      display: flex;
+      flex-direction: column;
       min-height: 100vh;
+      font-size: 14px;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Nav ── */
+    nav {
       display: flex;
       align-items: center;
-      justify-content: center;
-      padding: 2rem;
+      justify-content: space-between;
+      padding: 0 2rem;
+      height: 52px;
+      background: var(--white);
+      border-bottom: 1px solid var(--border);
     }
 
-    .card {
-      background: #fff;
-      border-radius: 12px;
-      box-shadow: 0 4px 24px rgba(0,0,0,0.10);
-      padding: 2.5rem;
-      width: 100%;
-      max-width: 560px;
-    }
-
-    h1 { font-size: 1.5rem; font-weight: 700; margin-bottom: 0.25rem; }
-
-    .subtitle { font-size: 0.9rem; color: #6b7280; margin-bottom: 2rem; }
-
-    label {
-      display: block;
-      font-size: 0.85rem;
+    .nav-wordmark {
+      font-size: 13px;
       font-weight: 600;
-      color: #374151;
+      color: var(--ink);
+      letter-spacing: -0.01em;
+    }
+
+    .nav-links {
+      display: flex;
+      gap: 1.5rem;
+      align-items: center;
+    }
+
+    .nav-links a {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--mid);
+      text-decoration: none;
+      transition: color 0.12s;
+    }
+    .nav-links a:hover { color: var(--ink); }
+
+    /* ── Main ── */
+    main {
+      flex: 1;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 3.5rem 1.5rem 3rem;
+    }
+
+    .tool-wrap {
+      width: 100%;
+      max-width: 440px;
+    }
+
+    .tool-header {
+      margin-bottom: 2rem;
+    }
+
+    .tool-title {
+      font-size: 22px;
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      line-height: 1.2;
+      color: var(--ink);
       margin-bottom: 0.4rem;
     }
 
-    .field { margin-bottom: 1.25rem; }
+    .tool-sub {
+      font-size: 13px;
+      color: var(--mid);
+      line-height: 1.5;
+    }
+
+    /* ── Form ── */
+    .field {
+      margin-bottom: 1rem;
+    }
+
+    label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--ink);
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+      margin-bottom: 0.35rem;
+    }
+
+    label .opt {
+      text-transform: none;
+      font-weight: 400;
+      color: var(--light);
+      letter-spacing: 0;
+    }
 
     input[type="file"],
     input[type="text"] {
       width: 100%;
       padding: 0.6rem 0.75rem;
-      border: 1px solid #d1d5db;
-      border-radius: 8px;
-      font-size: 0.9rem;
-      background: #f9fafb;
+      border: 1.5px solid var(--border);
+      border-radius: 6px;
+      font-size: 13px;
+      background: var(--white);
+      color: var(--ink);
+      font-family: inherit;
       outline: none;
-      transition: border-color 0.15s;
+      transition: border-color 0.12s;
     }
-
     input[type="file"]:focus,
-    input[type="text"]:focus { border-color: #3b82f6; background: #fff; }
+    input[type="text"]:focus { border-color: var(--focus); }
 
-    .hint { font-size: 0.78rem; color: #9ca3af; margin-top: 0.3rem; }
+    .hint {
+      font-size: 11.5px;
+      color: var(--light);
+      margin-top: 0.3rem;
+      line-height: 1.4;
+    }
 
-    button {
+    /* ── Buttons ── */
+    .btn {
+      display: block;
       width: 100%;
-      padding: 0.75rem;
-      background: #3b82f6;
-      color: #fff;
+      padding: 0.7rem 1rem;
       border: none;
-      border-radius: 8px;
-      font-size: 1rem;
+      border-radius: 6px;
+      font-size: 13px;
       font-weight: 600;
+      font-family: inherit;
       cursor: pointer;
-      transition: background 0.15s;
+      transition: background 0.12s, opacity 0.12s;
+      letter-spacing: 0.01em;
     }
 
-    button:hover:not(:disabled) { background: #2563eb; }
-    button:disabled { background: #93c5fd; cursor: not-allowed; }
+    .btn-run {
+      background: var(--ink);
+      color: var(--white);
+      margin-top: 0.5rem;
+    }
+    .btn-run:hover:not(:disabled) { background: #2A2A2A; }
+    .btn-run:disabled { opacity: 0.35; cursor: not-allowed; }
 
-    /* ── Status banner ── */
-    #status {
-      margin-top: 1.25rem;
-      padding: 0.75rem 1rem;
-      border-radius: 8px;
-      font-size: 0.88rem;
+    #downloadBtn {
+      background: var(--green);
+      color: var(--white);
       display: none;
+      margin-top: 0.75rem;
+    }
+    #downloadBtn:hover { background: var(--green-h); }
+
+    /* ── Status ── */
+    .status {
+      margin-top: 0.9rem;
+      padding: 0.65rem 0.8rem;
+      border-radius: 6px;
+      font-size: 13px;
+      border: 1px solid transparent;
+      display: none;
+      line-height: 1.45;
     }
 
-    #status.loading {
-      background: #eff6ff;
-      color: #1d4ed8;
+    .status.loading {
       display: flex;
       align-items: center;
       gap: 0.6rem;
+      background: #F0EEF9;
+      border-color: #C8C0E8;
+      color: #3A2D7A;
     }
 
-    #status.success { background: #f0fdf4; color: #15803d; display: block; }
-    #status.error   { background: #fef2f2; color: #b91c1c; display: block; white-space: pre-wrap; }
+    .status.success {
+      display: block;
+      background: var(--ok-bg);
+      border-color: var(--ok-br);
+      color: var(--ok-text);
+    }
+
+    .status.error {
+      display: block;
+      background: var(--err-bg);
+      border-color: var(--err-br);
+      color: var(--err-text);
+      white-space: pre-wrap;
+    }
 
     .spinner {
-      width: 18px; height: 18px;
-      border: 3px solid #bfdbfe;
-      border-top-color: #3b82f6;
+      width: 14px; height: 14px;
+      border: 2px solid #C8C0E8;
+      border-top-color: #5A4DBB;
       border-radius: 50%;
-      animation: spin 0.8s linear infinite;
+      animation: spin 0.7s linear infinite;
       flex-shrink: 0;
     }
-
     @keyframes spin { to { transform: rotate(360deg); } }
 
-    /* ── Validation panels ── */
+    /* ── Issue panels ── */
     .issue-panel {
-      margin-top: 1rem;
-      border-radius: 8px;
-      padding: 0.85rem 1rem;
-      font-size: 0.84rem;
+      margin-top: 0.65rem;
+      border-radius: 6px;
+      padding: 0.7rem 0.8rem;
+      font-size: 12.5px;
+      border: 1px solid transparent;
       display: none;
     }
-
     .issue-panel.has-items { display: block; }
+    .issue-panel.err-panel  { background: var(--err-bg); border-color: var(--err-br); color: var(--err-text); }
+    .issue-panel.warn-panel { background: var(--warn-bg); border-color: var(--warn-br); color: var(--warn-text); }
+    .issue-panel strong { display: block; font-size: 12px; font-weight: 600; margin-bottom: 0.4rem; }
+    .issue-panel ul { padding-left: 1rem; }
+    .issue-panel li { margin-bottom: 0.25rem; line-height: 1.45; }
 
-    .issue-panel.warn-panel { background: #fffbeb; border: 1px solid #fcd34d; color: #92400e; }
-    .issue-panel.err-panel  { background: #fef2f2; border: 1px solid #fca5a5; color: #7f1d1d; }
-
-    .issue-panel strong { display: block; margin-bottom: 0.5rem; font-size: 0.86rem; }
-
-    .issue-panel ul { padding-left: 1.1rem; }
-    .issue-panel li { margin-bottom: 0.35rem; line-height: 1.45; }
-
-    /* ── Buttons row ── */
-    #downloadBtn {
-      display: none;
-      margin-top: 0.75rem;
-      background: #16a34a;
+    /* ── Divider ── */
+    .divider {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 1.5rem 0 1rem;
     }
 
-    #downloadBtn:hover { background: #15803d; }
-
-    /* ── Footer / bug report link ── */
-    .footer {
-      margin-top: 1.5rem;
-      border-top: 1px solid #e5e7eb;
-      padding-top: 1rem;
-      text-align: center;
+    /* ── Footer row ── */
+    .bottom-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
     }
 
     .bug-link {
       background: none;
       border: none;
-      width: auto;
-      padding: 0;
-      font-size: 0.8rem;
-      color: #9ca3af;
+      font-size: 12px;
+      font-family: inherit;
+      color: var(--light);
       cursor: pointer;
+      padding: 0;
       text-decoration: underline;
+      text-underline-offset: 2px;
       text-decoration-style: dotted;
       font-weight: 400;
+      transition: color 0.12s;
     }
+    .bug-link:hover { color: var(--mid); }
 
-    .bug-link:hover { color: #6b7280; background: none; }
+    /* ── Site footer ── */
+    footer {
+      text-align: center;
+      padding: 1.25rem;
+      font-size: 12px;
+      color: var(--light);
+      border-top: 1px solid var(--border);
+    }
 
     /* ── Modal ── */
     .modal-overlay {
       position: fixed;
       inset: 0;
-      background: rgba(0,0,0,0.45);
-      display: flex;
+      background: rgba(0,0,0,0.4);
+      display: none;
       align-items: center;
       justify-content: center;
-      z-index: 100;
+      z-index: 200;
       padding: 1.5rem;
-      display: none;
     }
-
     .modal-overlay.open { display: flex; }
 
     .modal {
-      background: #fff;
-      border-radius: 12px;
-      box-shadow: 0 8px 40px rgba(0,0,0,0.18);
-      padding: 2rem;
+      background: var(--white);
+      border-radius: 8px;
+      box-shadow: 0 16px 56px rgba(0,0,0,0.2);
+      padding: 1.75rem;
       width: 100%;
-      max-width: 480px;
+      max-width: 420px;
     }
 
-    .modal h2 { font-size: 1.1rem; font-weight: 700; margin-bottom: 0.3rem; }
-    .modal p.modal-sub { font-size: 0.84rem; color: #6b7280; margin-bottom: 1rem; }
+    .modal h2 {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 0.2rem;
+    }
+
+    .modal-sub {
+      font-size: 12.5px;
+      color: var(--mid);
+      margin-bottom: 1rem;
+      line-height: 1.5;
+    }
 
     .modal textarea {
       width: 100%;
-      border: 1px solid #d1d5db;
-      border-radius: 8px;
+      border: 1.5px solid var(--border);
+      border-radius: 6px;
       padding: 0.6rem 0.75rem;
-      font-size: 0.9rem;
-      background: #f9fafb;
+      font-size: 13px;
+      background: var(--white);
       resize: vertical;
-      min-height: 110px;
+      min-height: 96px;
       outline: none;
       font-family: inherit;
-      transition: border-color 0.15s;
+      color: var(--ink);
+      transition: border-color 0.12s;
     }
-
-    .modal textarea:focus { border-color: #3b82f6; background: #fff; }
+    .modal textarea:focus { border-color: var(--focus); }
 
     .modal-actions {
       display: flex;
-      gap: 0.6rem;
-      margin-top: 0.9rem;
+      gap: 0.5rem;
+      margin-top: 0.75rem;
     }
+    .modal-actions .btn { flex: 1; }
 
-    .modal-actions button { flex: 1; }
-
-    .btn-cancel {
-      background: #f3f4f6;
-      color: #374151;
+    .btn-ghost {
+      background: #F0EDE8;
+      color: var(--ink);
     }
-
-    .btn-cancel:hover { background: #e5e7eb; }
+    .btn-ghost:hover { background: #E4E0D8; }
 
     #bugStatus {
-      margin-top: 0.75rem;
-      font-size: 0.84rem;
-      border-radius: 6px;
-      padding: 0.5rem 0.75rem;
+      margin-top: 0.6rem;
+      font-size: 12.5px;
+      border-radius: 5px;
+      padding: 0.5rem 0.7rem;
       display: none;
+      border: 1px solid transparent;
+    }
+    #bugStatus.success { background: var(--ok-bg); color: var(--ok-text); border-color: var(--ok-br); display: block; }
+    #bugStatus.error   { background: var(--err-bg); color: var(--err-text); border-color: var(--err-br); display: block; }
+
+    /* ── Packing layout canvas ── */
+    .vis-section {
+      display: none;
+      max-width: 740px;
+      margin: 0 auto 2rem;
+      width: 100%;
+      padding: 0 1.5rem;
     }
 
-    #bugStatus.success { background: #f0fdf4; color: #15803d; display: block; }
-    #bugStatus.error   { background: #fef2f2; color: #b91c1c; display: block; }
+    .vis-title {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--light);
+      margin-bottom: 0.6rem;
+    }
+
+    .vis-card {
+      background: var(--white);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem 1rem 0.75rem;
+      overflow: hidden;
+    }
+
+    #layoutCanvas { display: block; width: 100%; }
+
+    .vis-legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem 1rem;
+      margin-top: 0.7rem;
+      padding-top: 0.6rem;
+      border-top: 1px solid var(--border);
+    }
+
+    .leg-item {
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
+      font-size: 11px;
+      color: var(--mid);
+    }
+
+    .leg-swatch {
+      width: 11px; height: 11px;
+      border-radius: 2px;
+      border: 1px solid rgba(0,0,0,0.09);
+      flex-shrink: 0;
+    }
   </style>
 </head>
 <body>
-  <div class="card">
-    <h1>Container Packing Optimizer</h1>
-    <p class="subtitle">Upload your order spreadsheet to generate a packing report.</p>
 
-    <form id="form">
-      <div class="field">
-        <label for="file">Order file (.xlsx)</label>
-        <input type="file" id="file" name="file" accept=".xlsx,.xls" required />
+  <nav>
+    <span class="nav-wordmark">Container Packing Optimizer</span>
+    <div class="nav-links">
+      <a href="/faq">FAQ</a>
+    </div>
+  </nav>
+
+  <main>
+    <div class="tool-wrap">
+      <div class="tool-header">
+        <h1 class="tool-title">Generate a packing report</h1>
+        <p class="tool-sub">Upload your order spreadsheet to produce an optimised container loading plan.</p>
       </div>
 
-      <div class="field">
-        <label for="count_col">Order quantity column <span style="font-weight:400;color:#9ca3af">(optional)</span></label>
-        <input type="text" id="count_col" name="count_col"
-               placeholder="e.g. External Packaging Quantity" />
-        <p class="hint">Leave blank — the optimizer will auto-detect the right column.</p>
+      <form id="form">
+        <div class="field">
+          <label for="file">Order file <span class="opt">.xlsx or .xls</span></label>
+          <input type="file" id="file" name="file" accept=".xlsx,.xls" required />
+        </div>
+
+        <div class="field">
+          <label for="count_col">Quantity column <span class="opt">optional</span></label>
+          <input type="text" id="count_col" name="count_col"
+                 placeholder="e.g. External Packaging Quantity" />
+          <p class="hint">Leave blank — auto-detection is on by default.</p>
+        </div>
+
+        <button type="submit" id="runBtn" class="btn btn-run">Run Optimizer</button>
+      </form>
+
+      <div id="status" class="status"></div>
+
+      <div id="errPanel" class="issue-panel err-panel">
+        <strong>Issues detected</strong>
+        <ul id="errList"></ul>
+      </div>
+      <div id="warnPanel" class="issue-panel warn-panel">
+        <strong>Notices</strong>
+        <ul id="warnList"></ul>
       </div>
 
-      <button type="submit" id="runBtn">Run Optimizer</button>
-    </form>
+      <button id="downloadBtn" class="btn">Download Packing Report</button>
 
-    <div id="status"></div>
-
-    <!-- Validation issue panels (shown after a successful run) -->
-    <div id="errPanel"  class="issue-panel err-panel">
-      <strong>⚠ Issues detected in this result</strong>
-      <ul id="errList"></ul>
+      <hr class="divider" />
+      <div class="bottom-row">
+        <button class="bug-link" id="bugBtn" type="button">Something wrong? Report a bug</button>
+      </div>
     </div>
-    <div id="warnPanel" class="issue-panel warn-panel">
-      <strong>ℹ Notices</strong>
-      <ul id="warnList"></ul>
-    </div>
+  </main>
 
-    <button id="downloadBtn">Download Report</button>
-
-    <div class="footer">
-      <button class="bug-link" id="bugBtn" type="button">Something wrong? Report a bug</button>
+  <!-- Packing layout preview (shown after a successful run) -->
+  <div class="vis-section" id="visSection">
+    <div class="vis-title">Packing Layout Preview</div>
+    <div class="vis-card">
+      <canvas id="layoutCanvas"></canvas>
+      <div class="vis-legend">
+        <div class="leg-item"><div class="leg-swatch" style="background:#AED6F1"></div>115&times;115 pallet</div>
+        <div class="leg-item"><div class="leg-swatch" style="background:#FAD7A0"></div>115&times;108 pallet</div>
+        <div class="leg-item"><div class="leg-swatch" style="background:#A9DFBF"></div>115&times;77 pallet</div>
+        <div class="leg-item"><div class="leg-swatch" style="background:#D7BDE2"></div>77&times;77 pallet</div>
+        <div class="leg-item"><div class="leg-swatch" style="background:#FFF176;"></div>NP boxes</div>
+        <div class="leg-item"><div class="leg-swatch" style="background:#E8E8E8"></div>Empty space</div>
+      </div>
     </div>
   </div>
+
+  <footer>Container Packing Optimizer &mdash; Edelman</footer>
 
   <!-- Bug report modal -->
   <div class="modal-overlay" id="modalOverlay">
     <div class="modal">
       <h2>Report a Bug</h2>
-      <p class="modal-sub">Describe what happened. The last run's summary and any warnings will be attached automatically.</p>
-      <textarea id="bugMsg" placeholder="e.g. The pallet count for product X seems wrong…"></textarea>
+      <p class="modal-sub">Describe what happened. Run summary and warnings are attached automatically.</p>
+      <textarea id="bugMsg" placeholder="e.g. The pallet count for product X looks wrong…"></textarea>
       <div id="bugStatus"></div>
       <div class="modal-actions">
-        <button class="btn-cancel" id="cancelBtn" type="button">Cancel</button>
-        <button id="sendBugBtn" type="button">Send Report</button>
+        <button class="btn btn-ghost" id="cancelBtn" type="button">Cancel</button>
+        <button class="btn btn-run" id="sendBugBtn" type="button">Send Report</button>
       </div>
     </div>
   </div>
 
   <script>
-    const form        = document.getElementById("form");
-    const runBtn      = document.getElementById("runBtn");
-    const status      = document.getElementById("status");
-    const downloadBtn = document.getElementById("downloadBtn");
-    const errPanel    = document.getElementById("errPanel");
-    const warnPanel   = document.getElementById("warnPanel");
-    const errList     = document.getElementById("errList");
-    const warnList    = document.getElementById("warnList");
+    // ── Canvas layout drawing ─────────────────────────────────────────────
+    function drawLayout(containers, L_cm) {
+      const section = document.getElementById('visSection');
+      const canvas  = document.getElementById('layoutCanvas');
+      const ctx     = canvas.getContext('2d');
+      const dpr     = window.devicePixelRatio || 1;
 
-    // Modal
+      const LABEL_W  = 44;
+      const RULER_H  = 20;
+      const GAP      = 5;
+      const MIN_ROW  = 20;
+      const MAX_ROW  = 52;
+
+      const COLORS = {
+        '115x115': '#AED6F1',
+        '115x108': '#FAD7A0',
+        '115x77':  '#A9DFBF',
+        '77x77':   '#D7BDE2',
+        'np':      '#FFF176',
+        'empty':   '#E8E8E8',
+      };
+
+      const rowHeights = containers.map(c => {
+        const maxH = c.rows.reduce((m, r) => Math.max(m, r.h), 0) || 60;
+        return Math.max(MIN_ROW, Math.min(MAX_ROW, Math.round(maxH * MAX_ROW / 270)));
+      });
+
+      const displayW = canvas.parentElement.clientWidth;
+      const displayH = RULER_H + GAP + containers.reduce((s, _, i) => s + rowHeights[i] + GAP, 0);
+
+      canvas.width  = Math.round(displayW * dpr);
+      canvas.height = Math.round(displayH * dpr);
+      canvas.style.width  = displayW + 'px';
+      canvas.style.height = displayH + 'px';
+      ctx.scale(dpr, dpr);
+
+      const GRID_W = displayW - LABEL_W;
+      const SCALE  = GRID_W / L_cm;
+
+      // Clear
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(0, 0, displayW, displayH);
+
+      // Ruler background
+      ctx.fillStyle = '#F8F7F4';
+      ctx.fillRect(LABEL_W, 0, GRID_W, RULER_H);
+
+      // Ruler ticks + labels
+      ctx.font = '500 9px Inter, sans-serif';
+      ctx.textBaseline = 'middle';
+      for (let cm = 0; cm <= L_cm; cm += 100) {
+        const x = LABEL_W + cm * SCALE;
+        ctx.fillStyle = '#B0AAA4';
+        ctx.textAlign = 'center';
+        ctx.fillText(cm + 'cm', x, RULER_H / 2);
+        ctx.strokeStyle = '#D8D3CC';
+        ctx.lineWidth = 0.5;
+        ctx.beginPath(); ctx.moveTo(x, RULER_H - 3); ctx.lineTo(x, RULER_H); ctx.stroke();
+      }
+      ctx.strokeStyle = '#D8D3CC';
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(LABEL_W, RULER_H); ctx.lineTo(displayW, RULER_H); ctx.stroke();
+
+      // Container rows
+      let y = RULER_H + GAP;
+      containers.forEach((c, i) => {
+        const rowH = rowHeights[i];
+
+        // Label
+        ctx.fillStyle = '#5C5C5C';
+        ctx.font = '600 10px Inter, sans-serif';
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('C' + c.idx, LABEL_W - 5, y + rowH / 2);
+
+        // Empty background
+        ctx.fillStyle = COLORS.empty;
+        ctx.fillRect(LABEL_W, y, GRID_W, rowH);
+
+        // Pallet blocks
+        c.rows.forEach(row => {
+          const rx = LABEL_W + row.y * SCALE;
+          const rw = row.len * SCALE;
+          const fp = row.bt.split('|')[0];
+          ctx.fillStyle = COLORS[fp] || '#CCCCCC';
+          ctx.fillRect(rx, y, rw, rowH);
+          if (rw > 32) {
+            ctx.fillStyle = '#2A2A2A';
+            ctx.font = '500 8.5px Inter, sans-serif';
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(fp.replace('x', '\xD7') + ' (' + row.n + 'p)', rx + 3, y + rowH / 2);
+          }
+        });
+
+        // NP box zones
+        c.zones.forEach(zone => {
+          const zx = LABEL_W + zone.y * SCALE;
+          const zw = zone.len * SCALE;
+          ctx.fillStyle = COLORS.np;
+          ctx.fillRect(zx, y, zw, rowH);
+          if (zw > 22) {
+            ctx.fillStyle = '#6B5800';
+            ctx.font = '500 8.5px Inter, sans-serif';
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('NP (' + zone.n + ')', zx + 3, y + rowH / 2);
+          }
+        });
+
+        // Border
+        ctx.strokeStyle = '#C8C4BE';
+        ctx.lineWidth = 0.75;
+        ctx.strokeRect(LABEL_W + 0.5, y + 0.5, GRID_W - 1, rowH - 1);
+
+        y += rowH + GAP;
+      });
+
+      section.style.display = 'block';
+    }
+
+    const form         = document.getElementById("form");
+    const runBtn       = document.getElementById("runBtn");
+    const status       = document.getElementById("status");
+    const downloadBtn  = document.getElementById("downloadBtn");
+    const errPanel     = document.getElementById("errPanel");
+    const warnPanel    = document.getElementById("warnPanel");
+    const errList      = document.getElementById("errList");
+    const warnList     = document.getElementById("warnList");
     const modalOverlay = document.getElementById("modalOverlay");
     const bugBtn       = document.getElementById("bugBtn");
     const cancelBtn    = document.getElementById("cancelBtn");
@@ -298,11 +636,8 @@
     const bugMsg       = document.getElementById("bugMsg");
     const bugStatus    = document.getElementById("bugStatus");
 
-    // State from last run — sent with bug reports
-    let _reportBlob   = null;
-    let _lastRunMeta  = null;
-
-    // ── Helpers ──────────────────────────────────────────────────────────
+    let _reportBlob  = null;
+    let _lastRunMeta = null;
 
     function renderIssueList(ul, panel, items) {
       ul.innerHTML = "";
@@ -325,22 +660,20 @@
       warnList.innerHTML = "";
     }
 
-    // ── Optimize form ─────────────────────────────────────────────────────
-
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
       const fileInput = document.getElementById("file");
       if (!fileInput.files.length) return;
 
-      // Reset
       downloadBtn.style.display = "none";
+      document.getElementById('visSection').style.display = 'none';
       _reportBlob  = null;
       _lastRunMeta = null;
       runBtn.disabled = true;
       resetPanels();
 
-      status.className = "loading";
-      status.innerHTML = '<div class="spinner"></div><span>Running optimizer — this may take a moment…</span>';
+      status.className = "status loading";
+      status.innerHTML = '<div class="spinner"></div><span>Running optimizer &mdash; this may take a moment&hellip;</span>';
 
       const data = new FormData(form);
 
@@ -350,7 +683,6 @@
         if (resp.ok) {
           const json = await resp.json();
 
-          // Decode base64 report into a Blob
           const bytes  = atob(json.report_b64);
           const buffer = new Uint8Array(bytes.length);
           for (let i = 0; i < bytes.length; i++) buffer[i] = bytes.charCodeAt(i);
@@ -365,49 +697,46 @@
             errors:          json.errors   || [],
           };
 
-          // Status banner
           const hasErrors = json.errors && json.errors.length > 0;
-          status.className = hasErrors ? "error" : "success";
+          status.className = "status " + (hasErrors ? "error" : "success");
           status.textContent = hasErrors
-            ? `Optimization completed with ${json.errors.length} issue(s). Review below and download report.`
-            : `Done — ${json.container_count} container(s), ${json.total_pallets} pallets packed.`;
+            ? `Completed with ${json.errors.length} issue(s). Review below, then download the report.`
+            : `Done \u2014 ${json.container_count} container(s), ${json.total_pallets} pallets packed.`;
 
-          // Validation panels
           renderIssueList(errList,  errPanel,  json.errors);
           renderIssueList(warnList, warnPanel, json.warnings);
 
           downloadBtn.style.display = "block";
 
+          if (json.layout_data && json.layout_data.length) {
+            // Small delay so the section is visible before measuring width
+            setTimeout(() => drawLayout(json.layout_data, json.container_length_cm || 1203), 50);
+          }
+
         } else {
           const body = await resp.json().catch(() => ({ detail: resp.statusText }));
-          status.className = "error";
+          status.className = "status error";
           status.textContent = "Error: " + (body.detail || "An error occurred.");
         }
 
       } catch (err) {
-        status.className = "error";
+        status.className = "status error";
         status.textContent = "Network error: " + err.message;
       } finally {
         runBtn.disabled = false;
       }
     });
 
-    // ── Download ──────────────────────────────────────────────────────────
-
     downloadBtn.addEventListener("click", () => {
       if (!_reportBlob) return;
       const url = URL.createObjectURL(_reportBlob);
       const a   = document.createElement("a");
-      a.href     = url;
-      a.download = "packing_report.xlsx";
-      a.click();
+      a.href = url; a.download = "packing_report.xlsx"; a.click();
       URL.revokeObjectURL(url);
     });
 
-    // ── Bug report modal ──────────────────────────────────────────────────
-
     bugBtn.addEventListener("click", () => {
-      bugMsg.value    = "";
+      bugMsg.value = "";
       bugStatus.className = "";
       bugStatus.textContent = "";
       bugStatus.style.display = "none";
@@ -416,26 +745,19 @@
       bugMsg.focus();
     });
 
-    cancelBtn.addEventListener("click", () => {
-      modalOverlay.classList.remove("open");
-    });
+    cancelBtn.addEventListener("click", () => modalOverlay.classList.remove("open"));
 
-    // Close on overlay click
     modalOverlay.addEventListener("click", (e) => {
       if (e.target === modalOverlay) modalOverlay.classList.remove("open");
     });
 
-    // Close on Escape
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") modalOverlay.classList.remove("open");
     });
 
     sendBugBtn.addEventListener("click", async () => {
       const message = bugMsg.value.trim();
-      if (!message) {
-        bugMsg.focus();
-        return;
-      }
+      if (!message) { bugMsg.focus(); return; }
 
       sendBugBtn.disabled = true;
       bugStatus.style.display = "none";
@@ -452,25 +774,25 @@
 
       try {
         const resp = await fetch("/report-bug", {
-          method:  "POST",
+          method: "POST",
           headers: { "Content-Type": "application/json" },
-          body:    JSON.stringify(payload),
+          body: JSON.stringify(payload),
         });
 
         if (resp.ok) {
-          bugStatus.className   = "success";
-          bugStatus.textContent = "Report sent — thank you!";
+          bugStatus.className = "success";
+          bugStatus.textContent = "Report sent \u2014 thank you.";
           bugStatus.style.display = "block";
           setTimeout(() => modalOverlay.classList.remove("open"), 1800);
         } else {
           const err = await resp.json().catch(() => ({}));
-          bugStatus.className   = "error";
+          bugStatus.className = "error";
           bugStatus.textContent = err.detail || "Could not send report. Please try again.";
           bugStatus.style.display = "block";
           sendBugBtn.disabled = false;
         }
       } catch (err) {
-        bugStatus.className   = "error";
+        bugStatus.className = "error";
         bugStatus.textContent = "Network error: " + err.message;
         bugStatus.style.display = "block";
         sendBugBtn.disabled = false;

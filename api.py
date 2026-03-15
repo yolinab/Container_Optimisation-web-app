@@ -48,6 +48,11 @@ def index():
     return (Path(__file__).parent / "static" / "index.html").read_text(encoding="utf-8")
 
 
+@app.get("/faq", response_class=HTMLResponse)
+def faq():
+    return (Path(__file__).parent / "static" / "faq.html").read_text(encoding="utf-8")
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}
@@ -84,6 +89,33 @@ async def optimize(
         report_b64    = base64.b64encode(result["report_path"].read_bytes()).decode()
         issue_summary = _issues_to_frontend(result.get("validation_issues", []))
         containers    = result["containers"]
+        L_cm          = int(os.environ.get("CONTAINER_LENGTH_CM", 1203))
+
+        # Minimal layout data for the browser canvas visualisation
+        layout_data = [
+            {
+                "idx": c["container_index"],
+                "rows": [
+                    {
+                        "bt":  r["block_type"],
+                        "y":   r["y_start_cm"],
+                        "len": r["length_cm"],
+                        "h":   r["height_cm"],
+                        "n":   r["pallet_count"],
+                    }
+                    for r in c.get("rows", [])
+                ],
+                "zones": [
+                    {
+                        "y":   z["y_start_cm"],
+                        "len": z["length_cm"],
+                        "n":   sum(p["quantity"] for p in z.get("placed", [])),
+                    }
+                    for z in c.get("box_zones", [])
+                ],
+            }
+            for c in containers
+        ]
 
     return JSONResponse({
         "report_b64":      report_b64,
@@ -92,6 +124,8 @@ async def optimize(
         "total_pallets":   sum(c.get("loaded_value", 0) for c in containers),
         "warnings":        issue_summary["warnings"],
         "errors":          issue_summary["errors"],
+        "layout_data":     layout_data,
+        "container_length_cm": L_cm,
     })
 
 
