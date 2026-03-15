@@ -28,6 +28,7 @@ from models.A_1D_multi_container_placement import RowBlock1DOrderModel
 from utils.visualize_row_blocks import plot_all_row_block_containers_pallets
 from utils.recommend import recommend_fill_containers, print_recommendations
 from utils.export_excel import export_excel_report
+from utils.validate import validate_packing_result, report_validation_issues
 from config import (
     CONTAINER_LENGTH_CM, CONTAINER_WIDTH_CM, CONTAINER_HEIGHT_CM,
     CONTAINER_DOOR_HEIGHT_CM, CONTAINER_MAX_WEIGHT_KG, ROW_GAP_CM,
@@ -474,6 +475,26 @@ def main(
             print(f"  Unplaced boxes: {total_unplaced} (need additional container or space)")
         else:
             print("  All NP boxes assigned.")
+
+    # ------------------------------------------------------------
+    # 7b) Validation — sanity-check the full packing result
+    # ------------------------------------------------------------
+    _log(out_dir, "=== STEP 7b: Validating Packing Result ===")
+    validation_issues = validate_packing_result(
+        containers=containers,
+        original_blocks=blocks,
+        np_boxes=np_boxes,
+        L_cm=L_cm,
+        Hdoor_cm=Hdoor_cm,
+        Wmax_kg=Wmax_kg,
+        gap_cm=gap_cm,
+    )
+    has_errors = report_validation_issues(
+        validation_issues,
+        log_func=lambda msg: _log(out_dir, msg),
+    )
+    if has_errors:
+        _log(out_dir, "!! VALIDATION ERRORS FOUND — results may be incorrect !!")
 
     # ------------------------------------------------------------
     # 8) Fill recommendations

@@ -11,6 +11,7 @@ from utils.oneDbuildblocks import build_row_blocks_from_pallets
 from models.A_1D_multi_container_placement import RowBlock1DOrderModel
 from utils.recommend import recommend_fill_containers
 from utils.export_excel import export_excel_report
+from utils.validate import validate_packing_result, report_validation_issues
 from config import (
     CONTAINER_LENGTH_CM, CONTAINER_WIDTH_CM, CONTAINER_HEIGHT_CM,
     CONTAINER_DOOR_HEIGHT_CM, CONTAINER_MAX_WEIGHT_KG, ROW_GAP_CM,
@@ -255,6 +256,21 @@ def run_pipeline(
             box_len = sum(z["length_cm"] for z in container.get("box_zones", []))
             container["leftover_cm"] = max(0, container["leftover_cm"] - box_len)
 
+    # ── 4b) Validation ────────────────────────────────────────────────────────
+    print("Validating packing result...")
+    validation_issues = validate_packing_result(
+        containers=containers,
+        original_blocks=blocks,
+        np_boxes=np_boxes,
+        L_cm=L_cm,
+        Hdoor_cm=Hdoor_cm,
+        Wmax_kg=Wmax_kg,
+        gap_cm=gap_cm,
+    )
+    has_errors = report_validation_issues(validation_issues)
+    if has_errors:
+        print("!! VALIDATION ERRORS FOUND — results may be incorrect !!")
+
     # ── 5) Fill recommendations ───────────────────────────────────────────────
     print("Computing recommendations...")
     recs = recommend_fill_containers(
@@ -291,7 +307,8 @@ def run_pipeline(
     print(f"Done. {len(containers)} container(s) packed. Report: {report_path}")
 
     return {
-        "containers":      containers,
-        "recommendations": recs,
-        "report_path":     Path(report_path),
+        "containers":         containers,
+        "recommendations":    recs,
+        "report_path":        Path(report_path),
+        "validation_issues":  validation_issues,
     }
