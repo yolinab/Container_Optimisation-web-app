@@ -24,20 +24,12 @@
       box-shadow: 0 4px 24px rgba(0,0,0,0.10);
       padding: 2.5rem;
       width: 100%;
-      max-width: 520px;
+      max-width: 560px;
     }
 
-    h1 {
-      font-size: 1.5rem;
-      font-weight: 700;
-      margin-bottom: 0.25rem;
-    }
+    h1 { font-size: 1.5rem; font-weight: 700; margin-bottom: 0.25rem; }
 
-    .subtitle {
-      font-size: 0.9rem;
-      color: #6b7280;
-      margin-bottom: 2rem;
-    }
+    .subtitle { font-size: 0.9rem; color: #6b7280; margin-bottom: 2rem; }
 
     label {
       display: block;
@@ -62,16 +54,9 @@
     }
 
     input[type="file"]:focus,
-    input[type="text"]:focus {
-      border-color: #3b82f6;
-      background: #fff;
-    }
+    input[type="text"]:focus { border-color: #3b82f6; background: #fff; }
 
-    .hint {
-      font-size: 0.78rem;
-      color: #9ca3af;
-      margin-top: 0.3rem;
-    }
+    .hint { font-size: 0.78rem; color: #9ca3af; margin-top: 0.3rem; }
 
     button {
       width: 100%;
@@ -89,6 +74,7 @@
     button:hover:not(:disabled) { background: #2563eb; }
     button:disabled { background: #93c5fd; cursor: not-allowed; }
 
+    /* ── Status banner ── */
     #status {
       margin-top: 1.25rem;
       padding: 0.75rem 1rem;
@@ -105,22 +91,11 @@
       gap: 0.6rem;
     }
 
-    #status.success {
-      background: #f0fdf4;
-      color: #15803d;
-      display: block;
-    }
-
-    #status.error {
-      background: #fef2f2;
-      color: #b91c1c;
-      display: block;
-      white-space: pre-wrap;
-    }
+    #status.success { background: #f0fdf4; color: #15803d; display: block; }
+    #status.error   { background: #fef2f2; color: #b91c1c; display: block; white-space: pre-wrap; }
 
     .spinner {
-      width: 18px;
-      height: 18px;
+      width: 18px; height: 18px;
       border: 3px solid #bfdbfe;
       border-top-color: #3b82f6;
       border-radius: 50%;
@@ -130,6 +105,26 @@
 
     @keyframes spin { to { transform: rotate(360deg); } }
 
+    /* ── Validation panels ── */
+    .issue-panel {
+      margin-top: 1rem;
+      border-radius: 8px;
+      padding: 0.85rem 1rem;
+      font-size: 0.84rem;
+      display: none;
+    }
+
+    .issue-panel.has-items { display: block; }
+
+    .issue-panel.warn-panel { background: #fffbeb; border: 1px solid #fcd34d; color: #92400e; }
+    .issue-panel.err-panel  { background: #fef2f2; border: 1px solid #fca5a5; color: #7f1d1d; }
+
+    .issue-panel strong { display: block; margin-bottom: 0.5rem; font-size: 0.86rem; }
+
+    .issue-panel ul { padding-left: 1.1rem; }
+    .issue-panel li { margin-bottom: 0.35rem; line-height: 1.45; }
+
+    /* ── Buttons row ── */
     #downloadBtn {
       display: none;
       margin-top: 0.75rem;
@@ -137,6 +132,98 @@
     }
 
     #downloadBtn:hover { background: #15803d; }
+
+    /* ── Footer / bug report link ── */
+    .footer {
+      margin-top: 1.5rem;
+      border-top: 1px solid #e5e7eb;
+      padding-top: 1rem;
+      text-align: center;
+    }
+
+    .bug-link {
+      background: none;
+      border: none;
+      width: auto;
+      padding: 0;
+      font-size: 0.8rem;
+      color: #9ca3af;
+      cursor: pointer;
+      text-decoration: underline;
+      text-decoration-style: dotted;
+      font-weight: 400;
+    }
+
+    .bug-link:hover { color: #6b7280; background: none; }
+
+    /* ── Modal ── */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.45);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      padding: 1.5rem;
+      display: none;
+    }
+
+    .modal-overlay.open { display: flex; }
+
+    .modal {
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 8px 40px rgba(0,0,0,0.18);
+      padding: 2rem;
+      width: 100%;
+      max-width: 480px;
+    }
+
+    .modal h2 { font-size: 1.1rem; font-weight: 700; margin-bottom: 0.3rem; }
+    .modal p.modal-sub { font-size: 0.84rem; color: #6b7280; margin-bottom: 1rem; }
+
+    .modal textarea {
+      width: 100%;
+      border: 1px solid #d1d5db;
+      border-radius: 8px;
+      padding: 0.6rem 0.75rem;
+      font-size: 0.9rem;
+      background: #f9fafb;
+      resize: vertical;
+      min-height: 110px;
+      outline: none;
+      font-family: inherit;
+      transition: border-color 0.15s;
+    }
+
+    .modal textarea:focus { border-color: #3b82f6; background: #fff; }
+
+    .modal-actions {
+      display: flex;
+      gap: 0.6rem;
+      margin-top: 0.9rem;
+    }
+
+    .modal-actions button { flex: 1; }
+
+    .btn-cancel {
+      background: #f3f4f6;
+      color: #374151;
+    }
+
+    .btn-cancel:hover { background: #e5e7eb; }
+
+    #bugStatus {
+      margin-top: 0.75rem;
+      font-size: 0.84rem;
+      border-radius: 6px;
+      padding: 0.5rem 0.75rem;
+      display: none;
+    }
+
+    #bugStatus.success { background: #f0fdf4; color: #15803d; display: block; }
+    #bugStatus.error   { background: #fef2f2; color: #b91c1c; display: block; }
   </style>
 </head>
 <body>
@@ -161,7 +248,36 @@
     </form>
 
     <div id="status"></div>
+
+    <!-- Validation issue panels (shown after a successful run) -->
+    <div id="errPanel"  class="issue-panel err-panel">
+      <strong>⚠ Issues detected in this result</strong>
+      <ul id="errList"></ul>
+    </div>
+    <div id="warnPanel" class="issue-panel warn-panel">
+      <strong>ℹ Notices</strong>
+      <ul id="warnList"></ul>
+    </div>
+
     <button id="downloadBtn">Download Report</button>
+
+    <div class="footer">
+      <button class="bug-link" id="bugBtn" type="button">Something wrong? Report a bug</button>
+    </div>
+  </div>
+
+  <!-- Bug report modal -->
+  <div class="modal-overlay" id="modalOverlay">
+    <div class="modal">
+      <h2>Report a Bug</h2>
+      <p class="modal-sub">Describe what happened. The last run's summary and any warnings will be attached automatically.</p>
+      <textarea id="bugMsg" placeholder="e.g. The pallet count for product X seems wrong…"></textarea>
+      <div id="bugStatus"></div>
+      <div class="modal-actions">
+        <button class="btn-cancel" id="cancelBtn" type="button">Cancel</button>
+        <button id="sendBugBtn" type="button">Send Report</button>
+      </div>
+    </div>
   </div>
 
   <script>
@@ -169,22 +285,62 @@
     const runBtn      = document.getElementById("runBtn");
     const status      = document.getElementById("status");
     const downloadBtn = document.getElementById("downloadBtn");
+    const errPanel    = document.getElementById("errPanel");
+    const warnPanel   = document.getElementById("warnPanel");
+    const errList     = document.getElementById("errList");
+    const warnList    = document.getElementById("warnList");
 
-    let _reportBlob = null;
+    // Modal
+    const modalOverlay = document.getElementById("modalOverlay");
+    const bugBtn       = document.getElementById("bugBtn");
+    const cancelBtn    = document.getElementById("cancelBtn");
+    const sendBugBtn   = document.getElementById("sendBugBtn");
+    const bugMsg       = document.getElementById("bugMsg");
+    const bugStatus    = document.getElementById("bugStatus");
+
+    // State from last run — sent with bug reports
+    let _reportBlob   = null;
+    let _lastRunMeta  = null;
+
+    // ── Helpers ──────────────────────────────────────────────────────────
+
+    function renderIssueList(ul, panel, items) {
+      ul.innerHTML = "";
+      if (items && items.length) {
+        items.forEach(msg => {
+          const li = document.createElement("li");
+          li.textContent = msg;
+          ul.appendChild(li);
+        });
+        panel.classList.add("has-items");
+      } else {
+        panel.classList.remove("has-items");
+      }
+    }
+
+    function resetPanels() {
+      errPanel.classList.remove("has-items");
+      warnPanel.classList.remove("has-items");
+      errList.innerHTML  = "";
+      warnList.innerHTML = "";
+    }
+
+    // ── Optimize form ─────────────────────────────────────────────────────
 
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
-
       const fileInput = document.getElementById("file");
       if (!fileInput.files.length) return;
 
-      // Reset UI
+      // Reset
       downloadBtn.style.display = "none";
-      _reportBlob = null;
+      _reportBlob  = null;
+      _lastRunMeta = null;
       runBtn.disabled = true;
+      resetPanels();
 
       status.className = "loading";
-      status.innerHTML = '<div class="spinner"></div><span>Running optimizer — this may take a moment...</span>';
+      status.innerHTML = '<div class="spinner"></div><span>Running optimizer — this may take a moment…</span>';
 
       const data = new FormData(form);
 
@@ -192,18 +348,42 @@
         const resp = await fetch("/optimize", { method: "POST", body: data });
 
         if (resp.ok) {
-          const blob = await resp.blob();
-          _reportBlob = blob;
+          const json = await resp.json();
 
-          status.className = "success";
-          status.textContent = "Optimization complete. Download your report below.";
+          // Decode base64 report into a Blob
+          const bytes  = atob(json.report_b64);
+          const buffer = new Uint8Array(bytes.length);
+          for (let i = 0; i < bytes.length; i++) buffer[i] = bytes.charCodeAt(i);
+          _reportBlob = new Blob([buffer], {
+            type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+          });
+
+          _lastRunMeta = {
+            container_count: json.container_count,
+            total_pallets:   json.total_pallets,
+            warnings:        json.warnings || [],
+            errors:          json.errors   || [],
+          };
+
+          // Status banner
+          const hasErrors = json.errors && json.errors.length > 0;
+          status.className = hasErrors ? "error" : "success";
+          status.textContent = hasErrors
+            ? `Optimization completed with ${json.errors.length} issue(s). Review below and download report.`
+            : `Done — ${json.container_count} container(s), ${json.total_pallets} pallets packed.`;
+
+          // Validation panels
+          renderIssueList(errList,  errPanel,  json.errors);
+          renderIssueList(warnList, warnPanel, json.warnings);
+
           downloadBtn.style.display = "block";
+
         } else {
           const body = await resp.json().catch(() => ({ detail: resp.statusText }));
-          const msg  = body.detail || "An error occurred.";
           status.className = "error";
-          status.textContent = "Error: " + msg;
+          status.textContent = "Error: " + (body.detail || "An error occurred.");
         }
+
       } catch (err) {
         status.className = "error";
         status.textContent = "Network error: " + err.message;
@@ -211,6 +391,8 @@
         runBtn.disabled = false;
       }
     });
+
+    // ── Download ──────────────────────────────────────────────────────────
 
     downloadBtn.addEventListener("click", () => {
       if (!_reportBlob) return;
@@ -220,6 +402,79 @@
       a.download = "packing_report.xlsx";
       a.click();
       URL.revokeObjectURL(url);
+    });
+
+    // ── Bug report modal ──────────────────────────────────────────────────
+
+    bugBtn.addEventListener("click", () => {
+      bugMsg.value    = "";
+      bugStatus.className = "";
+      bugStatus.textContent = "";
+      bugStatus.style.display = "none";
+      sendBugBtn.disabled = false;
+      modalOverlay.classList.add("open");
+      bugMsg.focus();
+    });
+
+    cancelBtn.addEventListener("click", () => {
+      modalOverlay.classList.remove("open");
+    });
+
+    // Close on overlay click
+    modalOverlay.addEventListener("click", (e) => {
+      if (e.target === modalOverlay) modalOverlay.classList.remove("open");
+    });
+
+    // Close on Escape
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") modalOverlay.classList.remove("open");
+    });
+
+    sendBugBtn.addEventListener("click", async () => {
+      const message = bugMsg.value.trim();
+      if (!message) {
+        bugMsg.focus();
+        return;
+      }
+
+      sendBugBtn.disabled = true;
+      bugStatus.style.display = "none";
+
+      const payload = {
+        message,
+        ...((_lastRunMeta) ? {
+          container_count: _lastRunMeta.container_count,
+          total_pallets:   _lastRunMeta.total_pallets,
+          warnings:        _lastRunMeta.warnings,
+          errors:          _lastRunMeta.errors,
+        } : {}),
+      };
+
+      try {
+        const resp = await fetch("/report-bug", {
+          method:  "POST",
+          headers: { "Content-Type": "application/json" },
+          body:    JSON.stringify(payload),
+        });
+
+        if (resp.ok) {
+          bugStatus.className   = "success";
+          bugStatus.textContent = "Report sent — thank you!";
+          bugStatus.style.display = "block";
+          setTimeout(() => modalOverlay.classList.remove("open"), 1800);
+        } else {
+          const err = await resp.json().catch(() => ({}));
+          bugStatus.className   = "error";
+          bugStatus.textContent = err.detail || "Could not send report. Please try again.";
+          bugStatus.style.display = "block";
+          sendBugBtn.disabled = false;
+        }
+      } catch (err) {
+        bugStatus.className   = "error";
+        bugStatus.textContent = "Network error: " + err.message;
+        bugStatus.style.display = "block";
+        sendBugBtn.disabled = false;
+      }
     });
   </script>
 </body>
