@@ -18,6 +18,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+# Use the non-interactive Agg backend so matplotlib renders to PNG buffers
+# without needing a display.  Must be set before pyplot is first imported.
+import matplotlib
+matplotlib.use("Agg")
+
 # Make app/ importable without installing as a package
 sys.path.insert(0, str(Path(__file__).parent / "app"))
 
@@ -27,6 +32,10 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from pipeline import run_pipeline
+from utils.visualize_row_blocks import render_container_to_png_b64
+from config import (
+    CONTAINER_WIDTH_CM, CONTAINER_HEIGHT_CM, CONTAINER_DOOR_HEIGHT_CM, ROW_GAP_CM,
+)
 
 app = FastAPI(title="Container Packing Optimizer")
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -89,9 +98,10 @@ async def optimize(
         report_b64    = base64.b64encode(result["report_path"].read_bytes()).decode()
         issue_summary = _issues_to_frontend(result.get("validation_issues", []))
         containers    = result["containers"]
+        recs_by_idx   = {r["container_index"]: r for r in result.get("recommendations", [])}
         L_cm          = int(os.environ.get("CONTAINER_LENGTH_CM", 1203))
 
-        # Minimal layout data for the browser canvas visualisation
+        # Minimal layout data for the browser 2-D overview strip
         layout_data = [
             {
                 "idx": c["container_index"],
@@ -117,15 +127,34 @@ async def optimize(
             for c in containers
         ]
 
+        # 3-D matplotlib renders — one PNG per container
+        container_images = []
+        for c in containers:
+            rec = recs_by_idx.get(c["container_index"])
+            try:
+                img_b64 = render_container_to_png_b64(
+                    container=c,
+                    W=CONTAINER_WIDTH_CM,
+                    L=L_cm,
+                    H=CONTAINER_HEIGHT_CM,
+                    gap_cm=ROW_GAP_CM,
+                    rec=rec,
+                )
+                container_images.append(img_b64)
+            except Exception as exc:
+                print(f"[warn] Could not render 3-D image for container {c['container_index']}: {exc}")
+                container_images.append(None)
+
     return JSONResponse({
-        "report_b64":      report_b64,
-        "filename":        "packing_report.xlsx",
-        "container_count": len(containers),
-        "total_pallets":   sum(c.get("loaded_value", 0) for c in containers),
-        "warnings":        issue_summary["warnings"],
-        "errors":          issue_summary["errors"],
-        "layout_data":     layout_data,
+        "report_b64":        report_b64,
+        "filename":          "packing_report.xlsx",
+        "container_count":   len(containers),
+        "total_pallets":     sum(c.get("loaded_value", 0) for c in containers),
+        "warnings":          issue_summary["warnings"],
+        "errors":            issue_summary["errors"],
+        "layout_data":       layout_data,
         "container_length_cm": L_cm,
+        "container_images":  container_images,
     })
 
 

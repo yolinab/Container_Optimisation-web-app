@@ -1,6 +1,43 @@
 import pandas as pd
-from typing import List, Tuple, Dict
+from typing import List, Tuple, Dict, Any, Optional
 import re
+
+# ── Column aliases ──────────────────────────────────────────────────────────
+# Edit these lists when the source Excel renames a column.
+# Each list is tried in order; the FIRST match found in your file is used.
+# Only columns actually read by the optimizer are listed here.
+# ────────────────────────────────────────────────────────────────────────────
+COLUMN_ALIASES: Dict[str, List[str]] = {
+    # Pallet / box type code: A1, A2, NP …
+    "TYPE_CODE":    ["Pallet type", "Pallet size"],
+
+    # Physical dimensions string, e.g. "1.15x1.15x1.20"
+    "DIMENSIONS":   ["Pallet and packing size", "Pallet size", "size"],
+
+    # Number of units ordered (pallets for A-rows, boxes for NP rows)
+    "QUANTITY": [
+        "Order External Packaging Quantity",
+        "Ordered External Packaging Quantity",
+        "External Packaging Quantity",
+        "Total order full pallets",
+        "Total number of pallets",
+        "external packaging",
+        "full pallets",
+        "order full pallets",
+        "number of pallets",
+    ],
+
+    # Human-readable product description
+    "PRODUCT_NAME": ["Productname", "product name", "product"],
+
+    # Optional supplementary columns
+    "ITEM":         ["Item", "item"],
+    "BARCODE":      ["Barcode", "bar code", "ean"],
+    "CODE":         ["Code", "article", "sku"],
+    "WEIGHT":       ["External Net weight", "Net weight", "weight"],
+    "PRICE_FOB":    ["Item price FOB", "price fob", "fob price", "item price", "unit price"],
+}
+# ─────────────────────────────────────────────────────────────────────────────
 
 def print_parsed_pallets(pallets_data):
     """
@@ -147,16 +184,11 @@ def parse_pallet_excel(
     return lengths, widths, heights, pallets_data
 
 
-import pandas as pd
-from typing import List, Tuple, Dict, Any, Optional
-import re
-
-
 def _find_col_optional(df: pd.DataFrame, candidates: List[str]) -> Optional[str]:
     """
     Return first matching column name, or None if not found.
     Matching is prefix-based on normalised names (lower/strip/collapse-spaces).
-    Multiple consecutive spaces in column headers (e.g. "External  Packaging Quantity")
+    Multiple consecutive spaces in column headers (e.g. "Ordered External  Packaging Quantity")
     are collapsed to one before comparison.
     """
     import re
@@ -342,24 +374,23 @@ def parse_np_boxes_excel_v3(
     header_row = _detect_header_row(excel_path, sheet_name)
     df = pd.read_excel(excel_path, sheet_name=sheet_name, header=header_row)
 
-    # 'Pallet size' holds type-codes (A2, NP, etc.).
-    # Prefix "pallet size" matches "Pallet size" but NOT "Pallet and packing size".
-    col_type_code = _find_col_optional(df, ["Pallet size"])
-    # Actual dimension string
-    col_dimensions = _find_col_optional(df, ["Pallet and packing size"])
+    # Type-code column: contains A1, A2, NP, etc.
+    col_type_code = _find_col_optional(df, COLUMN_ALIASES["TYPE_CODE"])
+    # Physical dimension string e.g. "1.15x1.15x0.43"
+    col_dimensions = _find_col_optional(df, COLUMN_ALIASES["DIMENSIONS"])
 
     if col_type_code is None:
-        print("[NP boxes] No 'Pallet size' type-code column found; skipping NP parsing.")
+        print("[NP boxes] No type-code column (e.g. 'Pallet type') found; skipping NP parsing.")
         return []
     if col_dimensions is None:
-        print("[NP boxes] No 'Pallet and packing size' column found; skipping NP parsing.")
+        print("[NP boxes] No dimensions column (e.g. 'Pallet and packing size') found; skipping NP parsing.")
         return []
 
-    col_productname = _find_col_optional(df, ["Productname", "product name", "product"])
-    col_item        = _find_col_optional(df, ["Item", "item"])
-    col_barcode     = _find_col_optional(df, ["Barcode", "bar code", "ean"])
+    col_productname = _find_col_optional(df, COLUMN_ALIASES["PRODUCT_NAME"])
+    col_item        = _find_col_optional(df, COLUMN_ALIASES["ITEM"])
+    col_barcode     = _find_col_optional(df, COLUMN_ALIASES["BARCODE"])
 
-    # Count column: use override if provided, otherwise fuzzy-match candidates.
+    # Count column: use override if provided, otherwise fuzzy-match from COLUMN_ALIASES.
     if count_col_override is not None:
         if count_col_override not in df.columns:
             raise KeyError(
@@ -368,15 +399,10 @@ def parse_np_boxes_excel_v3(
             )
         count_cols: List[str] = [count_col_override]
     else:
-        col_count_eq  = _find_col_optional(df, ["External Packaging Quantity", "external packaging"])
-        col_count_tnp = _find_col_optional(df, ["Total number of pallets", "Total order full pallets", "number of pallets"])
-        count_cols = [c for c in [col_count_eq, col_count_tnp] if c]
+        col_count_eq = _find_col_optional(df, COLUMN_ALIASES["QUANTITY"])
+        count_cols = [c for c in [col_count_eq] if c]
 
-    col_weight = _find_col_optional(df, [
-        "External Net weight", "external net weight",
-        "Net weight", "net weight",
-        "Weight", "weight",
-    ])
+    col_weight = _find_col_optional(df, COLUMN_ALIASES["WEIGHT"])
 
     # Filter to NP rows
     np_mask = df[col_type_code].astype(str).str.strip().str.upper() == "NP"
@@ -465,9 +491,10 @@ def _detect_header_row(excel_path: str, sheet_name: Any = 0) -> int:
     Returns 0 (first row) as a fallback.
     """
     markers = {
-        "barcode", "pallet size", "pallet and packing size",
+        "barcode", "pallet type", "pallet size", "pallet and packing size",
         "productname", "product name", "total order full pallets",
         "total number of pallets", "total pallet in container",
+        "order external packaging quantity", "external packaging quantity",
     }
     df_raw = pd.read_excel(excel_path, sheet_name=sheet_name, header=None)
     for i, row in df_raw.iterrows():
@@ -501,8 +528,7 @@ def parse_pallet_excel_v3(
     df = pd.read_excel(excel_path, sheet_name=sheet_name, header=header_row)
 
     # Required columns
-    # "Pallet and packing size" (new format) takes priority over "Pallet size" (old format)
-    col_pallet_size = _find_col_required(df, ["Pallet and packing size", "Pallet size", "size"])
+    col_pallet_size = _find_col_required(df, COLUMN_ALIASES["DIMENSIONS"])
 
     if count_col_override is not None:
         if count_col_override not in df.columns:
@@ -512,30 +538,18 @@ def parse_pallet_excel_v3(
             )
         col_count = count_col_override
     else:
-        col_count = _find_col_required(df, ["External Packaging Quantity", "external packaging", "Total order full pallets", "Total number of pallets", "full pallets", "order full pallets", "number of pallets"])
+        col_count = _find_col_required(df, COLUMN_ALIASES["QUANTITY"])
 
     # Optional columns (best-effort)
-    col_productname = _find_col_optional(df, ["Productname", "product name", "product"])
-    col_item = _find_col_optional(df, ["Item", "item"])
-    col_barcode = _find_col_optional(df, ["Barcode", "bar code", "ean"])
-    col_code = _find_col_optional(df, ["Code", "article", "sku"])
-    col_pallet_type = _find_col_optional(df, ["pallet type", "type"])  # sometimes exists
-
-    # NEW: Optional weight column (best-effort)
-    # Common names in Edelman exports: "External Net weight", sometimes "External net weight"
-    col_weight = _find_col_optional(df, [
-        "External Net weight", "external net weight",
-        "External net weight", "external weight",
-        "Net weight", "net weight",
-        "Weight", "weight"
-    ])
-
-    col_price_fob = _find_col_optional(df, [
-        "Item price FOB", "price fob", "fob price", "item price", "unit price",
-    ])
+    col_productname = _find_col_optional(df, COLUMN_ALIASES["PRODUCT_NAME"])
+    col_item        = _find_col_optional(df, COLUMN_ALIASES["ITEM"])
+    col_barcode     = _find_col_optional(df, COLUMN_ALIASES["BARCODE"])
+    col_code        = _find_col_optional(df, COLUMN_ALIASES["CODE"])
+    col_weight      = _find_col_optional(df, COLUMN_ALIASES["WEIGHT"])
+    col_price_fob   = _find_col_optional(df, COLUMN_ALIASES["PRICE_FOB"])
 
     # Exclude NP (loose box) rows — handled separately by parse_np_boxes_excel_v3
-    col_type_code = _find_col_optional(df, ["Pallet size"])
+    col_type_code = _find_col_optional(df, COLUMN_ALIASES["TYPE_CODE"])
     if col_type_code:
         np_mask = df[col_type_code].astype(str).str.strip().str.upper() == "NP"
         df = df[~np_mask]
@@ -587,8 +601,8 @@ def parse_pallet_excel_v3(
             label_parts.append(str(row[col_productname]).strip())
         if col_item and pd.notna(row[col_item]):
             label_parts.append(str(row[col_item]).strip())
-        if not label_parts and col_pallet_type and pd.notna(row[col_pallet_type]):
-            label_parts.append(str(row[col_pallet_type]).strip())
+        if not label_parts and col_type_code and pd.notna(row[col_type_code]):
+            label_parts.append(str(row[col_type_code]).strip())
 
         pallet_label = " | ".join(label_parts) if label_parts else "UNKNOWN"
 
@@ -604,7 +618,6 @@ def parse_pallet_excel_v3(
             "weight_kg": weight_kg,
             "price_fob": price_fob,
         }
-        # Keep any useful ids if present
         if col_barcode and pd.notna(row[col_barcode]):
             type_row["barcode"] = str(row[col_barcode]).strip()
         if col_code and pd.notna(row[col_code]):

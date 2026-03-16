@@ -26,11 +26,11 @@ OUT.mkdir(exist_ok=True)
 def _row(product, pallet_size_code, dims_m, qty, weight=None):
     """One spreadsheet row."""
     return {
-        "Productname":              product,
-        "Pallet size":              pallet_size_code,   # "A2", "A1", "NP" …
-        "Pallet and packing size":  dims_m,             # "1.15x1.15x1.20"
-        "External Packaging Quantity": qty,
-        "External Net weight":      weight or "",
+        "Productname":                       product,
+        "Pallet type":                       pallet_size_code,   # "A2", "A1", "NP" …
+        "Pallet and packing size":           dims_m,             # "1.15x1.15x1.20"
+        "Order External Packaging Quantity": qty,
+        "External Net weight":               weight or "",
     }
 
 
@@ -42,7 +42,7 @@ def save(name, rows):
     df = pd.DataFrame(rows)
     path = OUT / name
     df.to_excel(path, index=False)
-    total = sum(r["External Packaging Quantity"] for r in rows)
+    total = sum(r["Order External Packaging Quantity"] for r in rows)
     print(f"  {path.name:45s}  {len(rows):3d} row(s)  {total:4d} units")
 
 

@@ -304,7 +304,8 @@ def build_rec_block_visuals(
 # Main 3D plotting function (refactored from your original)
 # ------------------------------------------------------------
 
-def plot_boxes_3d(W, L, H, boxes, box_zone_visuals=None, rec_box_visuals=None, title=None):
+def _build_3d_figure(W, L, H, boxes, box_zone_visuals=None, rec_box_visuals=None, title=None):
+    """Build and return a matplotlib Figure without showing or closing it."""
     fig = plt.figure(figsize=(12, 7))
     ax = fig.add_subplot(111, projection="3d")
 
@@ -467,7 +468,44 @@ def plot_boxes_3d(W, L, H, boxes, box_zone_visuals=None, rec_box_visuals=None, t
     # ------------------------------------------------
 
     plt.tight_layout()
+    return fig
+
+
+def plot_boxes_3d(W, L, H, boxes, box_zone_visuals=None, rec_box_visuals=None, title=None):
+    fig = _build_3d_figure(W, L, H, boxes, box_zone_visuals, rec_box_visuals, title)
     plt.show()
+
+
+def render_container_to_png_b64(
+    container: Dict[str, Any],
+    W: int,
+    L: int,
+    H: int,
+    gap_cm: int = 5,
+    rec: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Render a container as a 3-D PNG and return it as a base64 string.
+
+    Safe to call from a headless server (no display required) as long as the
+    'Agg' matplotlib backend is active.  Call ``matplotlib.use('Agg')`` before
+    importing pyplot (e.g. at the top of api.py) to ensure this.
+    """
+    import io
+    import base64
+
+    rows             = container.get("rows", [])
+    boxes            = build_pallet_boxes_from_row_blocks(rows, W, gap_cm=gap_cm)
+    box_zone_visuals = build_box_zone_visuals(container.get("box_zones"))
+    rec_box_visuals  = build_rec_block_visuals(rec, container, W, gap_cm)
+    title = f"Container {container.get('container_index', '')} — Pallet + NP Box View"
+
+    fig = _build_3d_figure(W, L, H, boxes, box_zone_visuals, rec_box_visuals, title)
+
+    buf = io.BytesIO()
+    fig.savefig(buf, format="png", dpi=110, bbox_inches="tight")
+    plt.close(fig)
+    buf.seek(0)
+    return base64.b64encode(buf.read()).decode("utf-8")
 
 
 # ------------------------------------------------------------
