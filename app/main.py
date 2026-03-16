@@ -326,15 +326,29 @@ def main(
             )
         print(f"\n--- Solving container {container_idx} ---")
 
-        # Reserve exactly 1 door-compatible block for the *next* container's door
-        # row; offer all others to the current solver.  Using only door_ok[:1]
-        # was too restrictive — it left most door_ok blocks for later containers,
-        # causing non-final containers to be packed to only ~25 % length.
+        # Strategy:
+        #   - If ALL remaining tall blocks fit in this one container (their total
+        #     length + gaps + smallest door row ≤ L), offer ALL remaining blocks
+        #     so the solver can fully fill this container.
+        #   - Otherwise keep the conservative door_ok[:1] to ensure every future
+        #     container has a valid door row available.
         door_ok   = [b for b in remaining_blocks if b.height_cm <= Hdoor_cm]
         door_over = [b for b in remaining_blocks if b.height_cm > Hdoor_cm]
         if door_over:
-            offer_door_ok = door_ok[:-1] if len(door_ok) > 1 else door_ok
-            blocks_for_solver = door_over + offer_door_ok
+            min_door_len = min(b.length_cm for b in door_ok) if door_ok else 0
+            tall_total = (
+                sum(b.length_cm for b in door_over)
+                + max(0, len(door_over) - 1) * gap_cm
+                + (gap_cm + min_door_len if door_ok else 0)
+            )
+            if tall_total <= L_cm:
+                # All tall blocks + a door row fit → last "tall" container; give
+                # the solver everything so it can pack door_ok rows too.
+                blocks_for_solver = remaining_blocks
+            else:
+                # More tall blocks than fit in one container → reserve door_ok
+                # so future containers always have a valid door row.
+                blocks_for_solver = door_over + door_ok[:1]
         else:
             blocks_for_solver = remaining_blocks
 
@@ -356,6 +370,7 @@ def main(
             gap_cm=gap_cm,
             Wmax_kg=Wmax_kg,
             Hdoor_cm=Hdoor_cm,
+            min_loaded_value=1,  # prevent solver returning empty selection on timeout
         )
 
         solved = model.solve(
