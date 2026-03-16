@@ -159,10 +159,15 @@ async def optimize(
 
 # ── Bug report ─────────────────────────────────────────────────────────────
 
+# GitHub repo that receives bug reports as Issues.
+# Override via GITHUB_REPO env var if the repo moves.
+_GITHUB_REPO = os.environ.get("GITHUB_REPO", "yolinab/Container_Optimisation-web-app")
+
+
 class BugReportRequest(BaseModel):
     message:         str
-    container_count: Optional[int]  = None
-    total_pallets:   Optional[int]  = None
+    container_count: Optional[int]       = None
+    total_pallets:   Optional[int]       = None
     warnings:        Optional[List[str]] = None
     errors:          Optional[List[str]] = None
 
@@ -170,79 +175,91 @@ class BugReportRequest(BaseModel):
 @app.post("/report-bug")
 async def report_bug(body: BugReportRequest):
     """
-    Send a bug report email via Resend (https://resend.com).
+    Create a GitHub Issue in the app repo as a bug report.
 
     Required Render environment variable:
-      RESEND_API_KEY — API key from resend.com dashboard
-    Optional:
-      BUG_EMAIL      — recipient address (defaults to yolina.yordanova@edelman.nl)
+      GITHUB_TOKEN — a GitHub Personal Access Token (classic) with the
+                     'repo' scope, or a fine-grained token with
+                     'Issues: Read and write' on this repository.
+
+    If GITHUB_TOKEN is not set, the report is logged to stdout (Render
+    captures this in the service logs) and a 'logged' status is returned
+    so the UI still shows a success message to the user.
     """
-    api_key   = os.environ.get("RESEND_API_KEY", "")
-    bug_email = os.environ.get("BUG_EMAIL", "yolina.yordanova@edelman.nl")
+    token     = os.environ.get("GITHUB_TOKEN", "")
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
-    if not api_key:
-        # Gracefully degrade — log to stdout so Render captures it
-        print(f"[BUG REPORT {timestamp}] RESEND_API_KEY not set. Message: {body.message}")
-        return {"status": "logged", "note": "Email not configured — report logged to server output."}
+    # ── Build Markdown issue body ──────────────────────────────────────
+    sections: List[str] = []
 
-    # Build plain-text body
-    lines = [
-        "Bug Report — Container Packing Optimizer",
-        f"Submitted: {timestamp}",
-        "",
-        "━" * 52,
-        "USER MESSAGE",
-        "━" * 52,
-        body.message.strip() or "(no message provided)",
-        "",
-    ]
+    sections.append(
+        f"**Submitted:** {timestamp}\n"
+    )
+
+    sections.append(
+        "### User message\n"
+        + (body.message.strip() or "_No message provided._")
+    )
 
     if body.container_count is not None:
-        lines += [
-            "━" * 52,
-            "LAST RUN SUMMARY",
-            "━" * 52,
-            f"Containers packed : {body.container_count}",
-            f"Total pallets     : {body.total_pallets}",
-            "",
-        ]
+        sections.append(
+            "### Last run summary\n"
+            f"| | |\n|---|---|\n"
+            f"| Containers packed | {body.container_count} |\n"
+            f"| Total pallets | {body.total_pallets} |"
+        )
 
     if body.errors:
-        lines += ["━" * 52, "ERRORS DETECTED", "━" * 52]
-        lines += [f"  !! {e}" for e in body.errors]
-        lines.append("")
+        sections.append(
+            "### Errors detected\n"
+            + "\n".join(f"- ⚠️ {e}" for e in body.errors)
+        )
 
     if body.warnings:
-        lines += ["━" * 52, "WARNINGS", "━" * 52]
-        lines += [f"  •  {w}" for w in body.warnings]
-        lines.append("")
+        sections.append(
+            "### Warnings\n"
+            + "\n".join(f"- {w}" for w in body.warnings)
+        )
 
+    issue_body = "\n\n".join(sections)
+    issue_title = f"[Bug Report] {(body.message.strip()[:60] + '…') if len(body.message.strip()) > 60 else body.message.strip() or timestamp}"
+
+    # ── Log regardless (Render captures stdout) ───────────────────────
+    print(f"[BUG REPORT {timestamp}] {body.message[:200]}")
+
+    if not token:
+        # No token configured — report is already logged above
+        return {"status": "logged", "note": "Logged to server output (GITHUB_TOKEN not configured)."}
+
+    # ── Post to GitHub Issues API ──────────────────────────────────────
     payload = json.dumps({
-        "from":    "Container Optimizer <onboarding@resend.dev>",
-        "to":      [bug_email],
-        "subject": f"[Bug Report] Container Optimizer — {timestamp}",
-        "text":    "\n".join(lines),
+        "title":  issue_title,
+        "body":   issue_body,
+        "labels": ["bug"],
     }).encode()
 
     req = urllib.request.Request(
-        "https://api.resend.com/emails",
+        f"https://api.github.com/repos/{_GITHUB_REPO}/issues",
         data=payload,
         headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type":  "application/json",
+            "Authorization":        f"Bearer {token}",
+            "Accept":               "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "Content-Type":         "application/json",
+            "User-Agent":           "container-packing-optimizer",
         },
     )
 
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
-            if resp.status not in (200, 201):
-                raise RuntimeError(f"Resend returned HTTP {resp.status}")
+            resp_data = json.loads(resp.read().decode())
+            issue_url = resp_data.get("html_url", "")
+        print(f"[BUG REPORT] GitHub issue created: {issue_url}")
     except Exception as exc:
-        print(f"[BUG REPORT] Failed to send email: {exc}")
+        print(f"[BUG REPORT] GitHub API error: {exc}")
         raise HTTPException(
             status_code=500,
-            detail="Could not send report — please try again or contact support directly.",
+            detail="Could not create bug report. The report has been logged — please contact support if this persists.",
         )
 
     return {"status": "sent"}
