@@ -618,7 +618,6 @@
         y += rowH + GAP;
       });
 
-      section.style.display = 'block';
     }
 
     const form         = document.getElementById("form");
@@ -709,7 +708,8 @@
           downloadBtn.style.display = "block";
 
           if (json.layout_data && json.layout_data.length) {
-            // Small delay so the section is visible before measuring width
+            // Show section first so clientWidth is non-zero when canvas measures it
+            document.getElementById('visSection').style.display = 'block';
             setTimeout(() => drawLayout(json.layout_data, json.container_length_cm || 1203), 50);
           }
 
