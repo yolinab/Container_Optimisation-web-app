@@ -326,11 +326,15 @@ def main(
             )
         print(f"\n--- Solving container {container_idx} ---")
 
-        # Reserve all but one door-compatible block for future containers' door rows.
+        # Reserve exactly 1 door-compatible block for the *next* container's door
+        # row; offer all others to the current solver.  Using only door_ok[:1]
+        # was too restrictive — it left most door_ok blocks for later containers,
+        # causing non-final containers to be packed to only ~25 % length.
         door_ok   = [b for b in remaining_blocks if b.height_cm <= Hdoor_cm]
         door_over = [b for b in remaining_blocks if b.height_cm > Hdoor_cm]
         if door_over:
-            blocks_for_solver = door_over + door_ok[:1]
+            offer_door_ok = door_ok[:-1] if len(door_ok) > 1 else door_ok
+            blocks_for_solver = door_over + offer_door_ok
         else:
             blocks_for_solver = remaining_blocks
 

@@ -223,9 +223,13 @@ def validate_packing_result(
             )
 
     # ── 8. Low fill on non-last containers ────────────────────────────────
+    # Count both pallet rows AND NP box zones — a container with a long NP tail
+    # is not under-filled even if used_length_cm (pallets only) is low.
     for c in containers[:-1]:
-        idx  = c["container_index"]
-        used = c.get("used_length_cm", 0)
+        idx        = c["container_index"]
+        pallet_len = c.get("used_length_cm", 0)
+        box_len    = sum(z.get("length_cm", 0) for z in c.get("box_zones", []))
+        used       = pallet_len + box_len
         if L_cm > 0:
             fill = used / L_cm
             if fill < _LOW_FILL_THRESHOLD:
