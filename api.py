@@ -95,11 +95,12 @@ async def optimize(
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"Unexpected error: {exc}")
 
-        report_b64    = base64.b64encode(result["report_path"].read_bytes()).decode()
-        issue_summary = _issues_to_frontend(result.get("validation_issues", []))
-        containers    = result["containers"]
-        recs_by_idx   = {r["container_index"]: r for r in result.get("recommendations", [])}
-        L_cm          = int(os.environ.get("CONTAINER_LENGTH_CM", 1203))
+        report_b64        = base64.b64encode(result["report_path"].read_bytes()).decode()
+        issue_summary     = _issues_to_frontend(result.get("validation_issues", []))
+        containers        = result["containers"]
+        recs_by_idx       = {r["container_index"]: r for r in result.get("recommendations", [])}
+        L_cm              = int(os.environ.get("CONTAINER_LENGTH_CM", 1203))
+        overall_decisions = result.get("overall_decisions", {})
 
         # Minimal layout data for the browser 2-D overview strip
         layout_data = [
@@ -123,6 +124,7 @@ async def optimize(
                     }
                     for z in c.get("box_zones", [])
                 ],
+                "decisions": c.get("decisions", {}),
             }
             for c in containers
         ]
@@ -155,6 +157,7 @@ async def optimize(
         "layout_data":       layout_data,
         "container_length_cm": L_cm,
         "container_images":  container_images,
+        "overall_decisions": overall_decisions,
     })
 
 

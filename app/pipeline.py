@@ -32,6 +32,84 @@ def _humanize_block_key(key: str) -> str:
         return key
 
 
+def _explain_container(
+    chosen_blocks,
+    blocks_for_solver,
+    door_over,
+    used_len_cm: int,
+    loaded_weight_kg: float,
+    L_cm: int,
+    Wmax_kg: int,
+    Hdoor_cm: int,
+    gap_cm: int,
+    blocks_remaining_after: int,
+) -> Dict[str, Any]:
+    """
+    Build a human-readable decisions dict for one container.
+    Returned as container["decisions"] and surfaced in the UI.
+    """
+    n_rows    = len(chosen_blocks)
+    n_pallets = sum(b.value for b in chosen_blocks)
+    len_pct   = round(100 * used_len_cm / L_cm)
+    wt_pct    = round(100 * loaded_weight_kg / Wmax_kg)
+
+    # Which constraint actually limited how much we packed?
+    leftover_cm = L_cm - used_len_cm
+    # Estimate whether one more block would have fit
+    min_next_len = min((b.length_cm for b in blocks_for_solver
+                        if b.block_id not in {x.block_id for x in chosen_blocks}),
+                       default=None)
+    length_limited = (min_next_len is not None) and (leftover_cm < min_next_len + gap_cm)
+    weight_limited = loaded_weight_kg > 0.95 * Wmax_kg
+
+    reasons = []
+    if length_limited:
+        reasons.append(f"container length ({L_cm} cm) reached — "
+                       f"only {leftover_cm} cm left, next block needs ≥{(min_next_len or 0)+gap_cm} cm")
+    if weight_limited:
+        reasons.append(f"weight limit ({Wmax_kg} kg) nearly reached — "
+                       f"{int(loaded_weight_kg)} kg loaded ({wt_pct}%)")
+    if door_over and not length_limited and not weight_limited:
+        reasons.append(
+            f"door-height rule: {len(door_over)} tall-pallet row(s) loaded from the rear, "
+            f"1 shorter row placed at the door ({Hdoor_cm} cm opening)"
+        )
+    if not reasons:
+        reasons.append("all available pallet blocks for this pass were packed")
+
+    # Heights in this container — explain ordering rule if mixed
+    heights = sorted({b.height_cm for b in chosen_blocks})
+    if len(heights) > 1:
+        max_h, min_h = max(heights), min(heights)
+        height_note = (
+            f"Mixed stack heights ({'/'.join(str(h)+' cm' for h in heights)}). "
+            f"Taller rows ({max_h} cm) are loaded first (rear of container); "
+            f"shorter rows ({min_h} cm) are nearest the door — required by the "
+            f"non-increasing height rule so everything fits through the "
+            f"{Hdoor_cm} cm door opening."
+        )
+    else:
+        height_note = (
+            f"All rows are {heights[0]} cm tall. "
+            f"Fits through the {Hdoor_cm} cm door opening."
+        )
+
+    return {
+        "rows_packed":          n_rows,
+        "pallets_packed":       n_pallets,
+        "length_used_cm":       used_len_cm,
+        "length_capacity_cm":   L_cm,
+        "length_pct":           len_pct,
+        "weight_kg":            int(loaded_weight_kg),
+        "weight_capacity_kg":   Wmax_kg,
+        "weight_pct":           wt_pct,
+        "tall_rows_at_rear":    len(door_over) > 0,
+        "blocks_deferred":      blocks_remaining_after,
+        "why_not_all_fit":      "; ".join(reasons),
+        "height_note":          height_note,
+    }
+
+
 def select_one_variant_per_block(blocks):
     """Keep exactly one variant per physical block_id (shortest length)."""
     best = {}
@@ -230,17 +308,33 @@ def run_pipeline(
             })
             y_cursor += b.length_cm + gap_cm
 
-        used_len = model.usedLen.value()
+        used_len    = model.usedLen.value()
+        loaded_wt   = model.loadedWeight.value()
+        remaining_blocks = [b for b in remaining_blocks if b.block_id not in used_block_ids]
+
+        decisions = _explain_container(
+            chosen_blocks=chosen_blocks,
+            blocks_for_solver=blocks_for_solver,
+            door_over=door_over,
+            used_len_cm=used_len,
+            loaded_weight_kg=loaded_wt,
+            L_cm=L_cm,
+            Wmax_kg=Wmax_kg,
+            Hdoor_cm=Hdoor_cm,
+            gap_cm=gap_cm,
+            blocks_remaining_after=len(remaining_blocks),
+        )
+
         containers.append({
             "container_index": container_idx,
             "rows":            rows,
             "used_length_cm":  used_len,
             "leftover_cm":     L_cm - used_len,
             "loaded_value":    model.loadedValue.value(),
-            "loaded_weight":   model.loadedWeight.value(),
+            "loaded_weight":   loaded_wt,
+            "decisions":       decisions,
         })
 
-        remaining_blocks = [b for b in remaining_blocks if b.block_id not in used_block_ids]
         container_idx += 1
 
     # ── 4) Assign NP boxes ────────────────────────────────────────────────────
@@ -306,9 +400,57 @@ def run_pipeline(
 
     print(f"Done. {len(containers)} container(s) packed. Report: {report_path}")
 
+    total_pallets = sum(c["loaded_value"] for c in containers)
+    avg_len_pct   = round(sum(c["decisions"]["length_pct"] for c in containers) / len(containers))
+    avg_wt_pct    = round(sum(c["decisions"]["weight_pct"]  for c in containers) / len(containers))
+
+    # Build a plain-language reason why multiple containers were needed
+    has_tall       = any(c["decisions"]["tall_rows_at_rear"]  for c in containers)
+    len_bottleneck = any("length" in c["decisions"]["why_not_all_fit"] for c in containers[:-1])
+    wt_bottleneck  = any("weight" in c["decisions"]["why_not_all_fit"] for c in containers[:-1])
+    nc             = len(containers)
+    if nc == 1:
+        overall_reason = "All pallets fit in a single container."
+    else:
+        parts = [f"{total_pallets} pallets required {nc} containers."]
+        if len_bottleneck:
+            parts.append(
+                f"Container length ({L_cm} cm) was the main limiting factor "
+                f"(average {avg_len_pct}% used)."
+            )
+        if wt_bottleneck:
+            parts.append(
+                f"Weight limit ({Wmax_kg} kg) was reached in some containers "
+                f"(average {avg_wt_pct}% used)."
+            )
+        if has_tall:
+            parts.append(
+                "Tall pallet rows (height > door) were loaded from the rear of each "
+                "container; a shorter door row was placed last to allow loading/unloading."
+            )
+        overall_reason = " ".join(parts)
+
+    overall_decisions = {
+        "containers_needed":  nc,
+        "total_pallets":      total_pallets,
+        "avg_length_pct":     avg_len_pct,
+        "avg_weight_pct":     avg_wt_pct,
+        "has_tall_blocks":    has_tall,
+        "overall_reason":     overall_reason,
+        "constraints": {
+            "container_length_cm":   L_cm,
+            "container_width_cm":    CONTAINER_WIDTH_CM,
+            "container_height_cm":   CONTAINER_HEIGHT_CM,
+            "door_height_cm":        Hdoor_cm,
+            "max_weight_kg":         Wmax_kg,
+            "row_gap_cm":            gap_cm,
+        },
+    }
+
     return {
         "containers":         containers,
         "recommendations":    recs,
         "report_path":        Path(report_path),
         "validation_issues":  validation_issues,
+        "overall_decisions":  overall_decisions,
     }

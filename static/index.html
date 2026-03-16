@@ -496,6 +496,115 @@
     details[open] .img-summary-hint { display: none; }
 
     #imgGrid { padding: 1rem; }
+
+    /* ── Packing decisions panel ── */
+    .dec-section {
+      display: none;
+      max-width: 740px;
+      margin: 0 auto 2rem;
+      width: 100%;
+      padding: 0 1.5rem;
+    }
+
+    .dec-section details {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--white);
+      overflow: hidden;
+    }
+
+    .dec-summary {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.7rem 0.9rem;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--mid);
+      cursor: pointer;
+      user-select: none;
+      list-style: none;
+      background: #FAFAF8;
+    }
+    .dec-summary::-webkit-details-marker { display: none; }
+    .dec-summary::before {
+      content: "▶";
+      font-size: 9px;
+      transition: transform 0.15s;
+      color: var(--light);
+    }
+    details[open] .dec-summary::before { transform: rotate(90deg); }
+    details[open] .dec-summary { border-bottom: 1px solid var(--border); }
+
+    .dec-summary-hint {
+      font-size: 11px;
+      font-weight: 400;
+      letter-spacing: 0;
+      text-transform: none;
+      color: var(--light);
+    }
+    details[open] .dec-summary-hint { display: none; }
+
+    .dec-body { padding: 1rem; }
+
+    .dec-overall {
+      font-size: 13px;
+      color: var(--ink);
+      line-height: 1.6;
+      margin-bottom: 1rem;
+      padding-bottom: 0.75rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .dec-containers { display: flex; flex-direction: column; gap: 0.6rem; }
+
+    .dec-row {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 0.6rem 0.8rem;
+    }
+
+    .dec-row-header {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--mid);
+      margin-bottom: 0.3rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .dec-bars { display: flex; gap: 0.5rem; margin-bottom: 0.4rem; }
+
+    .dec-bar-wrap { flex: 1; }
+    .dec-bar-label {
+      font-size: 10px;
+      color: var(--light);
+      margin-bottom: 2px;
+    }
+    .dec-bar-track {
+      height: 6px;
+      background: var(--border);
+      border-radius: 3px;
+      overflow: hidden;
+    }
+    .dec-bar-fill {
+      height: 100%;
+      border-radius: 3px;
+      background: var(--green);
+      transition: width 0.3s;
+    }
+    .dec-bar-fill.warn { background: #D4890A; }
+
+    .dec-why {
+      font-size: 11px;
+      color: var(--mid);
+      line-height: 1.5;
+      margin-top: 0.35rem;
+    }
+    .dec-why strong { color: var(--ink); }
   </style>
 </head>
 <body>
@@ -564,6 +673,17 @@
         <div class="leg-item"><div class="leg-swatch" style="background:#E8E8E8"></div>Empty space</div>
       </div>
     </div>
+  </div>
+
+  <!-- Packing decisions panel -->
+  <div class="dec-section" id="decSection">
+    <details id="decDetails">
+      <summary class="dec-summary">Packing Decisions <span class="dec-summary-hint">(click to expand)</span></summary>
+      <div class="dec-body">
+        <div class="dec-overall" id="decOverall"></div>
+        <div class="dec-containers" id="decContainers"></div>
+      </div>
+    </details>
   </div>
 
   <!-- 3-D container renders (one image per container, collapsible) -->
@@ -757,8 +877,11 @@
 
       downloadBtn.style.display = "none";
       document.getElementById('visSection').style.display = 'none';
+      document.getElementById('decSection').style.display = 'none';
       document.getElementById('imgSection').style.display = 'none';
       document.getElementById('imgGrid').innerHTML = '';
+      document.getElementById('decContainers').innerHTML = '';
+      document.getElementById('decOverall').textContent = '';
       _reportBlob  = null;
       _lastRunMeta = null;
       runBtn.disabled = true;
@@ -804,6 +927,41 @@
             // Show section first so clientWidth is non-zero when canvas measures it
             document.getElementById('visSection').style.display = 'block';
             setTimeout(() => drawLayout(json.layout_data, json.container_length_cm || 1203), 50);
+          }
+
+          // Packing decisions panel
+          if (json.overall_decisions && json.layout_data) {
+            const od = json.overall_decisions;
+            document.getElementById('decOverall').textContent = od.overall_reason || '';
+            const cont = document.getElementById('decContainers');
+            cont.innerHTML = '';
+            json.layout_data.forEach((c, i) => {
+              const d = c.decisions || {};
+              const lenPct = d.length_pct || 0;
+              const wtPct  = d.weight_pct  || 0;
+              const div = document.createElement('div');
+              div.className = 'dec-row';
+              div.innerHTML = `
+                <div class="dec-row-header">Container ${c.idx}</div>
+                <div class="dec-bars">
+                  <div class="dec-bar-wrap">
+                    <div class="dec-bar-label">Length ${lenPct}% of ${d.length_capacity_cm || ''}cm</div>
+                    <div class="dec-bar-track"><div class="dec-bar-fill${lenPct > 95 ? ' warn' : ''}" style="width:${lenPct}%"></div></div>
+                  </div>
+                  <div class="dec-bar-wrap">
+                    <div class="dec-bar-label">Weight ${wtPct}% of ${(d.weight_capacity_kg||'').toLocaleString()}kg</div>
+                    <div class="dec-bar-track"><div class="dec-bar-fill${wtPct > 90 ? ' warn' : ''}" style="width:${wtPct}%"></div></div>
+                  </div>
+                </div>
+                <div class="dec-why">
+                  <strong>${d.rows_packed || 0} row(s), ${d.pallets_packed || 0} pallet(s).</strong>
+                  ${d.height_note ? ' ' + d.height_note : ''}
+                  ${d.why_not_all_fit ? '<br>Limit: ' + d.why_not_all_fit + '.' : ''}
+                  ${d.blocks_deferred > 0 ? ' ' + d.blocks_deferred + ' row-block(s) deferred to next container(s).' : ''}
+                </div>`;
+              cont.appendChild(div);
+            });
+            document.getElementById('decSection').style.display = 'block';
           }
 
           if (json.container_images && json.container_images.some(Boolean)) {

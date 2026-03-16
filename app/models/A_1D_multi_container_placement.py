@@ -199,6 +199,9 @@ class RowBlock1DOrderModel:
     def solve(self, solver='ortools', time_limit=None):
         if time_limit is not None:
             self._cp_solver.parameters.max_time_in_seconds = float(time_limit)
+        # Single worker + fixed seed → fully deterministic results
+        self._cp_solver.parameters.num_search_workers = 1
+        self._cp_solver.parameters.random_seed = 42
         # Support both old (Solve) and new (solve) ortools CpSolver API
         if hasattr(self._cp_solver, 'Solve'):
             status = self._cp_solver.Solve(self._cp_model)

@@ -22,7 +22,8 @@ _DEFAULTS: dict = {
     # Gap between consecutive pallet row-blocks along the container length (cm)
     "ROW_GAP_CM":                    5,
     # Solver wall-clock time limit per container (seconds)
-    "SOLVER_TIME_LIMIT_SEC":         5,
+    # 3 s is enough for typical orders; raise via env var for very large/complex ones
+    "SOLVER_TIME_LIMIT_SEC":         3,
     # Recommendation objective (see recommend.py for valid values)
     "RECOMMEND_OBJECTIVE":           "min_leftover",
     "RECOMMEND_SECONDARY_OBJECTIVE": "min_pallets",
