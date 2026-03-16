@@ -451,6 +451,51 @@
       width: 100%;
       height: auto;
     }
+
+    details#imgDetails {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--white);
+      overflow: hidden;
+    }
+
+    .img-summary {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.7rem 0.9rem;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--mid);
+      cursor: pointer;
+      user-select: none;
+      list-style: none;
+      background: #FAFAF8;
+    }
+    .img-summary::-webkit-details-marker { display: none; }
+    .img-summary::before {
+      content: "▶";
+      font-size: 9px;
+      transition: transform 0.15s;
+      color: var(--light);
+    }
+    details[open] .img-summary::before { transform: rotate(90deg); }
+    details[open] .img-summary {
+      border-bottom: 1px solid var(--border);
+    }
+
+    .img-summary-hint {
+      font-size: 11px;
+      font-weight: 400;
+      letter-spacing: 0;
+      text-transform: none;
+      color: var(--light);
+    }
+    details[open] .img-summary-hint { display: none; }
+
+    #imgGrid { padding: 1rem; }
   </style>
 </head>
 <body>
@@ -521,10 +566,12 @@
     </div>
   </div>
 
-  <!-- 3-D container renders (one image per container) -->
+  <!-- 3-D container renders (one image per container, collapsible) -->
   <div class="img-section" id="imgSection">
-    <div class="vis-title">3-D Packing View</div>
-    <div class="img-grid" id="imgGrid"></div>
+    <details id="imgDetails">
+      <summary class="img-summary">3-D Packing View <span class="img-summary-hint">(click to expand)</span></summary>
+      <div class="img-grid" id="imgGrid"></div>
+    </details>
   </div>
 
   <footer>Container Packing Optimizer &mdash; Edelman</footer>

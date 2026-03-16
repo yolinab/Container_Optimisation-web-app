@@ -306,13 +306,17 @@ def build_rec_block_visuals(
 
 def _build_3d_figure(W, L, H, boxes, box_zone_visuals=None, rec_box_visuals=None, title=None):
     """Build and return a matplotlib Figure without showing or closing it."""
-    fig = plt.figure(figsize=(12, 7))
+    fig = plt.figure(figsize=(14, 7))
     ax = fig.add_subplot(111, projection="3d")
 
     ax.set_xlim(0, W)
     ax.set_ylim(0, L)
     ax.set_zlim(0, H)
     ax.set_box_aspect((W, L, H))
+
+    # Side view with slight top angle so both the length and top face are visible
+    # elev=20 → low enough to see the side clearly, azim=-65 → slight diagonal angle
+    ax.view_init(elev=20, azim=-65)
 
     colors = [
         "tab:blue", "tab:orange", "tab:green",
