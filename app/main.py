@@ -326,29 +326,15 @@ def main(
             )
         print(f"\n--- Solving container {container_idx} ---")
 
-        # Strategy:
-        #   - If ALL remaining tall blocks fit in this one container (their total
-        #     length + gaps + smallest door row ≤ L), offer ALL remaining blocks
-        #     so the solver can fully fill this container.
-        #   - Otherwise keep the conservative door_ok[:1] to ensure every future
-        #     container has a valid door row available.
+        # Reserve all but one door-compatible block for future containers' door rows.
+        # The "low fill" this causes on the last tall container is intentional —
+        # the remaining length is filled with NP boxes in step 7.
+        # (The LOW_FILL_NON_LAST validator now counts NP box zones so this no
+        #  longer triggers a false warning.)
         door_ok   = [b for b in remaining_blocks if b.height_cm <= Hdoor_cm]
         door_over = [b for b in remaining_blocks if b.height_cm > Hdoor_cm]
         if door_over:
-            min_door_len = min(b.length_cm for b in door_ok) if door_ok else 0
-            tall_total = (
-                sum(b.length_cm for b in door_over)
-                + max(0, len(door_over) - 1) * gap_cm
-                + (gap_cm + min_door_len if door_ok else 0)
-            )
-            if tall_total <= L_cm:
-                # All tall blocks + a door row fit → last "tall" container; give
-                # the solver everything so it can pack door_ok rows too.
-                blocks_for_solver = remaining_blocks
-            else:
-                # More tall blocks than fit in one container → reserve door_ok
-                # so future containers always have a valid door row.
-                blocks_for_solver = door_over + door_ok[:1]
+            blocks_for_solver = door_over + door_ok[:1]
         else:
             blocks_for_solver = remaining_blocks
 
