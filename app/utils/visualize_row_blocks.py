@@ -316,7 +316,7 @@ def _build_3d_figure(W, L, H, boxes, box_zone_visuals=None, rec_box_visuals=None
 
     # Side view with slight top angle so both the length and top face are visible
     # elev=20 → low enough to see the side clearly, azim=-65 → slight diagonal angle
-    ax.view_init(elev=20, azim=-65)
+    ax.view_init(elev=20, azim=115)
 
     colors = [
         "tab:blue", "tab:orange", "tab:green",
