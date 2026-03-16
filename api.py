@@ -70,12 +70,9 @@ def health():
 @app.post("/optimize")
 async def optimize(
     file: UploadFile = File(...),
-    count_col: str = Form(""),
 ):
     if not file.filename or not file.filename.lower().endswith((".xlsx", ".xls")):
         raise HTTPException(status_code=400, detail="Only Excel files (.xlsx, .xls) are accepted.")
-
-    col_override = count_col.strip() or None
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path   = Path(tmp)
@@ -88,7 +85,6 @@ async def optimize(
             result = run_pipeline(
                 excel_path=excel_path,
                 out_dir=tmp_path / "outputs",
-                count_col_override=col_override,
             )
         except RuntimeError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
