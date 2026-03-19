@@ -398,7 +398,15 @@ def run_pipeline(
     )
     has_errors = report_validation_issues(validation_issues)
     if has_errors:
-        print("!! VALIDATION ERRORS FOUND — results may be incorrect !!")
+        error_messages = [
+            f"[{i['code']}] {i['message']}"
+            for i in validation_issues
+            if i["level"] == "ERROR"
+        ]
+        raise RuntimeError(
+            "Packing validation failed — the computed solution violates physical "
+            "constraints and cannot be used:\n" + "\n".join(error_messages)
+        )
 
     # ── 5) Fill recommendations ───────────────────────────────────────────────
     print("Computing recommendations...")
