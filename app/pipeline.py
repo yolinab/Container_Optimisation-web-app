@@ -258,30 +258,61 @@ def run_pipeline(
             )
         print(f"  Solving container {container_idx} ({len(remaining_blocks)} blocks remaining)...")
 
-        # Reserve all but one door-compatible block for future containers' door rows.
         door_ok   = [b for b in remaining_blocks if b.height_cm <= Hdoor_cm]
         door_over = [b for b in remaining_blocks if b.height_cm > Hdoor_cm]
-        blocks_for_solver = (door_over + door_ok[:1]) if door_over else remaining_blocks
 
-        lens = [b.length_cm for b in blocks_for_solver]
-        hs   = [b.height_cm for b in blocks_for_solver]
-        ws   = [b.weight_kg for b in blocks_for_solver]
-        vals = [b.value     for b in blocks_for_solver]
+        if door_over and not door_ok:
+            heights_str = ", ".join(str(h) for h in sorted({b.height_cm for b in door_over}))
+            raise RuntimeError(
+                f"Cannot pack remaining blocks into container {container_idx}: "
+                f"all remaining rows ({heights_str} cm) are taller than the door "
+                f"opening ({Hdoor_cm} cm) and no shorter rows are left to place at "
+                f"the door. Reduce pallet stack heights or split the order."
+            )
 
-        model = RowBlock1DOrderModel(
-            lengths_cm=lens,
-            heights_cm=hs,
-            weights_kg=ws,
-            values=vals,
-            L_cm=L_cm,
-            gap_cm=gap_cm,
-            Wmax_kg=Wmax_kg,
-            Hdoor_cm=Hdoor_cm,
-        )
+        def _solve_candidate(candidate_blocks):
+            m = RowBlock1DOrderModel(
+                lengths_cm=[b.length_cm for b in candidate_blocks],
+                heights_cm=[b.height_cm for b in candidate_blocks],
+                weights_kg=[b.weight_kg for b in candidate_blocks],
+                values    =[b.value     for b in candidate_blocks],
+                L_cm=L_cm, gap_cm=gap_cm, Wmax_kg=Wmax_kg, Hdoor_cm=Hdoor_cm,
+            )
+            ok = m.solve(solver=solver, time_limit=time_limit)
+            return m, ok
 
-        solved = model.solve(solver=solver, time_limit=time_limit)
+        if door_over:
+            # Determine whether all remaining door_over blocks fit length-wise
+            # in this single container.  If they do, this is the last door_over
+            # container — offer all door_ok freely so none are wasted.
+            # If not, at least one future container will still need a door_ok row,
+            # so reserve one per future container (conservative: 1 per door_over
+            # block remaining beyond what fits here).
+            door_over_total_len = (
+                sum(b.length_cm for b in door_over)
+                + max(0, len(door_over) - 1) * gap_cm
+            )
+            if door_over_total_len <= L_cm:
+                # All door_over fit here — no future door_over containers needed.
+                blocks_for_solver = door_over + door_ok
+            else:
+                # More containers will follow; reserve 1 door_ok per extra container.
+                # Estimate extra containers = ceil(excess length / container length).
+                excess = door_over_total_len - L_cm
+                extra_containers = -(-excess // L_cm)   # ceiling division
+                n_reserve = int(extra_containers)
+                door_ok_to_offer = door_ok[:max(1, len(door_ok) - n_reserve)]
+                blocks_for_solver = door_over + door_ok_to_offer
+        else:
+            blocks_for_solver = remaining_blocks
+
+        model, solved = _solve_candidate(blocks_for_solver)
         if not solved:
-            raise RuntimeError(f"No feasible solution for container {container_idx}")
+            raise RuntimeError(
+                f"No feasible solution for container {container_idx}. "
+                f"Block heights: {sorted({b.height_cm for b in blocks_for_solver})} cm, "
+                f"container L={L_cm} cm, Hdoor={Hdoor_cm} cm, Wmax={Wmax_kg} kg."
+            )
 
         chosen_variant_indices = model.loaded_indices_in_order()
         chosen_blocks = [blocks_for_solver[i - 1] for i in chosen_variant_indices]
