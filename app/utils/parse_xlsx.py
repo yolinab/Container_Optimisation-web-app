@@ -496,13 +496,20 @@ def _detect_header_row(excel_path: str, sheet_name: Any = 0) -> int:
         "total number of pallets", "total pallet in container",
         "order external packaging quantity", "external packaging quantity",
     }
+
+    def _norm_cell(v) -> str:
+        # Replace non-breaking spaces (\xa0) before comparing. Excel files
+        # exported from corporate systems use \xa0 instead of regular spaces,
+        # causing .strip().lower() to silently fail to match known markers.
+        s = str(v).replace('\xa0', ' ')
+        return re.sub(r' +', ' ', s).strip().lower()
+
     df_raw = pd.read_excel(excel_path, sheet_name=sheet_name, header=None)
     for i, row in df_raw.iterrows():
-        row_lower = {str(v).strip().lower() for v in row.values if pd.notna(v)}
+        row_lower = {_norm_cell(v) for v in row.values if pd.notna(v)}
         if len(row_lower & markers) >= 2:
             return int(i)
     return 0
-
 
 def parse_pallet_excel_v3(
     excel_path: str,
