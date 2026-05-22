@@ -441,7 +441,7 @@ def recommend_fill_containers(
     np_boxes — list of NP box type dicts from the current order.  These are
                treated as full-width row placements alongside pallet blocks.
     """
-    type_table          = build_block_type_table(Hdoor_cm)
+    type_table          = build_block_type_table(W, H_container_cm, Hdoor_cm)
     price_by_type       = _compute_type_price_fob(containers)
     np_box_cands_global = _build_np_box_candidates(np_boxes or [], W)
     order_qty_by_key    = _compute_order_qty_by_key(containers)

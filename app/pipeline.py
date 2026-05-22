@@ -17,6 +17,7 @@ from config import (
     CONTAINER_DOOR_HEIGHT_CM, CONTAINER_MAX_WEIGHT_KG, ROW_GAP_CM,
     SOLVER_TIME_LIMIT_SEC,
     RECOMMEND_OBJECTIVE, RECOMMEND_SECONDARY_OBJECTIVE,
+    ACTIVE_CONTAINER_TYPE,
 )
 
 
@@ -178,6 +179,8 @@ def run_pipeline(
     out_dir=None,
     count_col_override=None,
     L_cm: int = CONTAINER_LENGTH_CM,
+    W_cm: int = CONTAINER_WIDTH_CM,
+    H_cm: int = CONTAINER_HEIGHT_CM,
     gap_cm: int = ROW_GAP_CM,
     Wmax_kg: int = CONTAINER_MAX_WEIGHT_KG,
     Hdoor_cm: int = CONTAINER_DOOR_HEIGHT_CM,
@@ -214,6 +217,8 @@ def run_pipeline(
     print("Building row-blocks...")
     blocks, recommendations, warnings = build_row_blocks_from_pallets(
         meta_per_pallet,
+        W_cm=W_cm,
+        H_cm=H_cm,
         Hdoor_cm=Hdoor_cm,
         require_multiples=True,
     )
@@ -374,7 +379,7 @@ def run_pipeline(
         print("Assigning NP boxes...")
         unplaced = assign_boxes_to_containers(
             containers, np_boxes,
-            W=CONTAINER_WIDTH_CM, Hdoor=Hdoor_cm, L=L_cm, Wmax_kg=Wmax_kg,
+            W=W_cm, Hdoor=Hdoor_cm, L=L_cm, Wmax_kg=Wmax_kg,
         )
         # Update leftover_cm and decisions length stats to include NP box zones
         for container in containers:
@@ -413,9 +418,9 @@ def run_pipeline(
     recs = recommend_fill_containers(
         containers,
         Hdoor_cm=Hdoor_cm,
-        H_container_cm=CONTAINER_HEIGHT_CM,
-        W=CONTAINER_WIDTH_CM,
-        gap_cm=ROW_GAP_CM,
+        H_container_cm=H_cm,
+        W=W_cm,
+        gap_cm=gap_cm,
         objective=RECOMMEND_OBJECTIVE,
         secondary=RECOMMEND_SECONDARY_OBJECTIVE,
         np_boxes=np_boxes if np_boxes else None,
@@ -424,12 +429,13 @@ def run_pipeline(
     # ── 6) Excel report ───────────────────────────────────────────────────────
     print("Generating Excel report...")
     _config = {
-        "CONTAINER_LENGTH_CM":      CONTAINER_LENGTH_CM,
-        "CONTAINER_WIDTH_CM":       CONTAINER_WIDTH_CM,
-        "CONTAINER_HEIGHT_CM":      CONTAINER_HEIGHT_CM,
-        "CONTAINER_DOOR_HEIGHT_CM": CONTAINER_DOOR_HEIGHT_CM,
-        "CONTAINER_MAX_WEIGHT_KG":  CONTAINER_MAX_WEIGHT_KG,
-        "ROW_GAP_CM":               ROW_GAP_CM,
+        "CONTAINER_TYPE":           ACTIVE_CONTAINER_TYPE,
+        "CONTAINER_LENGTH_CM":      L_cm,
+        "CONTAINER_WIDTH_CM":       W_cm,
+        "CONTAINER_HEIGHT_CM":      H_cm,
+        "CONTAINER_DOOR_HEIGHT_CM": Hdoor_cm,
+        "CONTAINER_MAX_WEIGHT_KG":  Wmax_kg,
+        "ROW_GAP_CM":               gap_cm,
         "RECOMMEND_OBJECTIVE":      RECOMMEND_OBJECTIVE,
     }
     report_path = export_excel_report(
@@ -481,9 +487,10 @@ def run_pipeline(
         "has_tall_blocks":    has_tall,
         "overall_reason":     overall_reason,
         "constraints": {
+            "container_type":        ACTIVE_CONTAINER_TYPE,
             "container_length_cm":   L_cm,
-            "container_width_cm":    CONTAINER_WIDTH_CM,
-            "container_height_cm":   CONTAINER_HEIGHT_CM,
+            "container_width_cm":    W_cm,
+            "container_height_cm":   H_cm,
             "door_height_cm":        Hdoor_cm,
             "max_weight_kg":         Wmax_kg,
             "row_gap_cm":            gap_cm,

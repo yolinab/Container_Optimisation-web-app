@@ -35,6 +35,7 @@ from pipeline import run_pipeline
 from utils.visualize_row_blocks import render_container_to_png_b64
 from config import (
     CONTAINER_WIDTH_CM, CONTAINER_HEIGHT_CM, CONTAINER_DOOR_HEIGHT_CM, ROW_GAP_CM,
+    CONTAINER_PRESETS,
 )
 
 app = FastAPI(title="Container Packing Optimizer")
@@ -70,9 +71,20 @@ def health():
 @app.post("/optimize")
 async def optimize(
     file: UploadFile = File(...),
+    container_type: str = Form("40HC"),
 ):
     if not file.filename or not file.filename.lower().endswith((".xlsx", ".xls")):
         raise HTTPException(status_code=400, detail="Only Excel files (.xlsx, .xls) are accepted.")
+
+    ctype = container_type.strip().upper()
+    if ctype not in CONTAINER_PRESETS:
+        raise HTTPException(status_code=400, detail=f"Unknown container type '{ctype}'. Valid options: {list(CONTAINER_PRESETS)}")
+    preset = CONTAINER_PRESETS[ctype]
+    L_cm     = preset["length_cm"]
+    W_cm     = preset["width_cm"]
+    H_cm     = preset["height_cm"]
+    Hdoor_cm = preset["door_height_cm"]
+    Wmax_kg  = preset["max_weight_kg"]
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path   = Path(tmp)
@@ -85,6 +97,11 @@ async def optimize(
             result = run_pipeline(
                 excel_path=excel_path,
                 out_dir=tmp_path / "outputs",
+                L_cm=L_cm,
+                W_cm=W_cm,
+                H_cm=H_cm,
+                Hdoor_cm=Hdoor_cm,
+                Wmax_kg=Wmax_kg,
             )
         except RuntimeError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
@@ -95,7 +112,6 @@ async def optimize(
         issue_summary     = _issues_to_frontend(result.get("validation_issues", []))
         containers        = result["containers"]
         recs_by_idx       = {r["container_index"]: r for r in result.get("recommendations", [])}
-        L_cm              = int(os.environ.get("CONTAINER_LENGTH_CM", 1203))
         overall_decisions = result.get("overall_decisions", {})
 
         # Minimal layout data for the browser 2-D overview strip
@@ -132,9 +148,9 @@ async def optimize(
             try:
                 img_b64 = render_container_to_png_b64(
                     container=c,
-                    W=CONTAINER_WIDTH_CM,
+                    W=W_cm,
                     L=L_cm,
-                    H=CONTAINER_HEIGHT_CM,
+                    H=H_cm,
                     gap_cm=ROW_GAP_CM,
                     rec=rec,
                 )
@@ -144,16 +160,18 @@ async def optimize(
                 container_images.append(None)
 
     return JSONResponse({
-        "report_b64":        report_b64,
-        "filename":          "packing_report.xlsx",
-        "container_count":   len(containers),
-        "total_pallets":     sum(c.get("loaded_value", 0) for c in containers),
-        "warnings":          issue_summary["warnings"],
-        "errors":            issue_summary["errors"],
-        "layout_data":       layout_data,
+        "report_b64":          report_b64,
+        "filename":            "packing_report.xlsx",
+        "container_count":     len(containers),
+        "total_pallets":       sum(c.get("loaded_value", 0) for c in containers),
+        "warnings":            issue_summary["warnings"],
+        "errors":              issue_summary["errors"],
+        "layout_data":         layout_data,
         "container_length_cm": L_cm,
-        "container_images":  container_images,
-        "overall_decisions": overall_decisions,
+        "container_height_cm": H_cm,
+        "container_type":      ctype,
+        "container_images":    container_images,
+        "overall_decisions":   overall_decisions,
     })
 
 

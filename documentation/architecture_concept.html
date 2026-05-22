@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Container Optimizer — How It Works</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: "Inter", -apple-system, sans-serif;
+      background: #F5F4F1;
+      color: #0F0F0F;
+      padding: 3rem 2rem 4rem;
+      min-height: 100vh;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 3rem;
+    }
+    header h1 {
+      font-size: 1.75rem;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      margin-bottom: 0.4rem;
+    }
+    header p {
+      font-size: 0.95rem;
+      color: #5C5C5C;
+    }
+
+    /* ── Layout: two columns ── */
+    .canvas {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0;
+      max-width: 780px;
+      margin: 0 auto;
+    }
+
+    /* ── Step card ── */
+    .step {
+      display: flex;
+      align-items: stretch;
+      width: 100%;
+      position: relative;
+    }
+
+    /* Alternating left / right layout */
+    .step.right { flex-direction: row-reverse; }
+
+    /* Numbered circle on the spine */
+    .spine {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      flex-shrink: 0;
+      width: 60px;
+    }
+    .num {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.85rem;
+      font-weight: 700;
+      color: #fff;
+      flex-shrink: 0;
+      z-index: 1;
+      position: relative;
+    }
+    .line {
+      width: 2px;
+      flex: 1;
+      background: #D0CCC5;
+    }
+    .step:last-child .line { display: none; }
+
+    /* Card */
+    .card {
+      background: #fff;
+      border: 1px solid #E0DDD8;
+      border-radius: 12px;
+      padding: 1.25rem 1.5rem;
+      margin: 0 1rem 2rem;
+      flex: 1;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+      transition: box-shadow 0.15s;
+    }
+    .card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.1); }
+
+    .card-icon {
+      font-size: 1.6rem;
+      margin-bottom: 0.5rem;
+      display: block;
+    }
+    .card-title {
+      font-size: 1rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 0.3rem;
+    }
+    .card-body {
+      font-size: 0.84rem;
+      color: #4A4A4A;
+      line-height: 1.55;
+    }
+    .card-note {
+      margin-top: 0.65rem;
+      padding: 0.45rem 0.65rem;
+      border-radius: 6px;
+      font-size: 0.78rem;
+      font-weight: 500;
+      line-height: 1.45;
+    }
+
+    /* Accent colours per step */
+    .s1 .num { background: #145C35; }
+    .s1 .card-note { background: #EDF7F1; color: #145C35; }
+
+    .s2 .num { background: #1A3A5C; }
+    .s2 .card-note { background: #EBF5FB; color: #1A3A5C; }
+
+    .s3 .num { background: #6B3FA0; }
+    .s3 .card-note { background: #F5EEFF; color: #6B3FA0; }
+
+    .s4 .num { background: #7B3F00; }
+    .s4 .card-note { background: #FDF3E7; color: #7B3F00; }
+
+    .s5 .num { background: #1A3A5C; }
+    .s5 .card-note { background: #EBF5FB; color: #1A3A5C; }
+
+    .s6 .num { background: #4A235A; }
+    .s6 .card-note { background: #FDF0FF; color: #4A235A; }
+
+    .s7 .num { background: #145C35; }
+    .s7 .card-note { background: #EDF7F1; color: #145C35; }
+
+    .s8 .num { background: #0F0F0F; }
+    .s8 .card-note { background: #F5F4F1; color: #0F0F0F; }
+
+    /* ── Input / Output banners ── */
+    .banner {
+      width: 100%;
+      max-width: 780px;
+      margin: 0 auto 2rem;
+      border-radius: 12px;
+      padding: 1rem 1.5rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      font-size: 0.88rem;
+      font-weight: 500;
+    }
+    .banner-in  { background: #145C35; color: #fff; }
+    .banner-out { background: #0F0F0F; color: #fff; }
+    .banner-icon { font-size: 1.5rem; }
+    .banner-title { font-size: 1rem; font-weight: 700; margin-bottom: 0.1rem; }
+    .banner-sub   { font-size: 0.8rem; opacity: 0.75; }
+
+    /* ── Section divider ── */
+    .divider {
+      text-align: center;
+      font-size: 0.72rem;
+      font-weight: 600;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: #9A9A9A;
+      margin: 0.5rem 0 2rem;
+    }
+
+    /* ── Constraint pill row ── */
+    .pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.4rem;
+      margin-top: 0.65rem;
+    }
+    .pill {
+      background: #F5F4F1;
+      border: 1px solid #D0CCC5;
+      border-radius: 20px;
+      padding: 0.2rem 0.6rem;
+      font-size: 0.74rem;
+      color: #3C3C3C;
+      font-weight: 500;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <h1>Container Packing Optimizer</h1>
+    <p>How your order goes from Excel file to a packed container plan</p>
+  </header>
+
+  <!-- Input banner -->
+  <div class="banner banner-in" style="max-width:780px;margin:0 auto 2.5rem;">
+    <span class="banner-icon">📋</span>
+    <div>
+      <div class="banner-title">Input — Your Order File</div>
+      <div class="banner-sub">An Excel spreadsheet listing each pallet type, its dimensions, and how many you've ordered</div>
+    </div>
+  </div>
+
+  <div class="canvas">
+
+    <!-- Step 1 -->
+    <div class="step s1">
+      <div class="spine">
+        <div class="num">1</div>
+        <div class="line"></div>
+      </div>
+      <div class="card">
+        <span class="card-icon">🔍</span>
+        <div class="card-title">Read &amp; Understand the Order</div>
+        <div class="card-body">
+          The file is scanned to find the relevant columns — even if they have
+          slightly different names or blank rows at the top. Each row becomes
+          a pallet type with its size (length × width × height) and quantity.
+          Loose boxes labelled <strong>NP</strong> are separated out for later.
+        </div>
+        <div class="card-note">
+          💡 Accepts both comma and dot decimals, flexible column names,
+          and auto-skips any unrecognisable rows.
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 2 -->
+    <div class="step right s2">
+      <div class="spine">
+        <div class="num">2</div>
+        <div class="line"></div>
+      </div>
+      <div class="card">
+        <span class="card-icon">📦</span>
+        <div class="card-title">Group Pallets into Physical Rows</div>
+        <div class="card-body">
+          Pallets are grouped into the rows they'll physically form inside a container.
+          A row is a set of same-type pallets stacked and placed side-by-side across
+          the container's 235 cm width. The number of pallets per row depends on
+          their footprint and how many can be stacked safely.
+        </div>
+        <div class="card-note">
+          ⚠️ Your order quantity must be an exact multiple of each row's pallet count.
+          If not, the tool tells you exactly how many pallets to add.
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 3 -->
+    <div class="step s3">
+      <div class="spine">
+        <div class="num">3</div>
+        <div class="line"></div>
+      </div>
+      <div class="card">
+        <span class="card-icon">🧠</span>
+        <div class="card-title">Work Out the Best Loading Order</div>
+        <div class="card-body">
+          A mathematical optimiser tests thousands of combinations and picks the
+          arrangement that fits the <strong>most pallets</strong> into each container.
+          It obeys three physical rules: the total length of rows must fit inside the
+          container, the weight must stay under the limit, and taller rows must go at
+          the back so everything can pass through the door.
+        </div>
+        <div class="pills">
+          <span class="pill">📏 Max length 1 203 cm</span>
+          <span class="pill">⚖️ Max weight 18 000 kg</span>
+          <span class="pill">🚪 Door opening 250 cm</span>
+          <span class="pill">↕️ Tall rows loaded from rear</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 4 -->
+    <div class="step right s4">
+      <div class="spine">
+        <div class="num">4</div>
+        <div class="line"></div>
+      </div>
+      <div class="card">
+        <span class="card-icon">🗃️</span>
+        <div class="card-title">Fit Loose Boxes into the Gaps</div>
+        <div class="card-body">
+          Once the pallet rows are placed, any remaining space at the back of the
+          container is filled with the loose (NP) boxes from your order. The tool
+          tries every orientation for each box type to find the densest fit,
+          stacking multiple box types in the same section rather than dedicating
+          a separate section to each.
+        </div>
+        <div class="card-note">
+          📌 Boxes go in the tail space only — they can't be placed on top of pallets.
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 5 -->
+    <div class="step s5">
+      <div class="spine">
+        <div class="num">5</div>
+        <div class="line"></div>
+      </div>
+      <div class="card">
+        <span class="card-icon">✅</span>
+        <div class="card-title">Check Everything Adds Up</div>
+        <div class="card-body">
+          Before producing any output, the result is cross-checked: every pallet
+          from your order must appear exactly once, no container can be over-length
+          or over-weight, and the door-height rule must hold. Any discrepancy stops
+          the process and reports a clear error.
+        </div>
+        <div class="card-note">
+          🔎 8 automatic checks — if all pass, the plan is guaranteed to be
+          physically valid.
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 6 -->
+    <div class="step right s6">
+      <div class="spine">
+        <div class="num">6</div>
+        <div class="line"></div>
+      </div>
+      <div class="card">
+        <span class="card-icon">💡</span>
+        <div class="card-title">Suggest What Else Could Fit</div>
+        <div class="card-body">
+          The tool looks at any unused space — the gap after the last pallet row,
+          and the headroom above shorter rows — and recommends additional pallets
+          or boxes you could add to your order to make use of that space.
+          Suggestions are proportional to what you're already ordering.
+        </div>
+        <div class="card-note">
+          📈 Two zones checked per container: tail space and above-row headroom.
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 7 -->
+    <div class="step s7">
+      <div class="spine">
+        <div class="num">7</div>
+        <div class="line"></div>
+      </div>
+      <div class="card">
+        <span class="card-icon">📊</span>
+        <div class="card-title">Generate the Report</div>
+        <div class="card-body">
+          A formatted Excel report is created with four sheets: a summary overview,
+          a detailed per-container breakdown, a colour-coded packing layout grid,
+          and the fill recommendations. A 3-D image of each container is also
+          rendered showing exactly where every row sits.
+        </div>
+        <div class="card-note">
+          📥 The report downloads automatically in your browser.
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /canvas -->
+
+  <!-- Output banner -->
+  <div class="banner banner-out" style="max-width:780px;margin:2rem auto 0;">
+    <span class="banner-icon">📤</span>
+    <div>
+      <div class="banner-title">Output — Your Packing Plan</div>
+      <div class="banner-sub">
+        Excel report · 3-D container images · Fill recommendations · Warnings &amp; errors
+      </div>
+    </div>
+  </div>
+
+</body>
+</html>

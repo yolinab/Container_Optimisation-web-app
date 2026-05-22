@@ -160,9 +160,11 @@ def _col_header_row(ws, row: int, headers: List[str], col_start: int = 1,
 def _write_overview(ws, containers, recs, np_boxes, unplaced, config):
     ws.sheet_view.showGridLines = False
 
-    L     = config.get("CONTAINER_LENGTH_CM", 1203)
-    W     = config.get("CONTAINER_WIDTH_CM", 235)
-    Hdoor = config.get("CONTAINER_DOOR_HEIGHT_CM", 250)
+    L          = config.get("CONTAINER_LENGTH_CM",      1203)
+    W          = config.get("CONTAINER_WIDTH_CM",        235)
+    H          = config.get("CONTAINER_HEIGHT_CM",       269)
+    Hdoor      = config.get("CONTAINER_DOOR_HEIGHT_CM",  259)
+    ctype      = config.get("CONTAINER_TYPE",           "40HC")
 
     total_pallets  = sum(c["loaded_value"]  for c in containers)
     total_weight   = sum(c["loaded_weight"] for c in containers)
@@ -195,7 +197,7 @@ def _write_overview(ws, containers, recs, np_boxes, unplaced, config):
 
     run_time = datetime.datetime.now().strftime("%d %b %Y  %H:%M")
     _merge_write(ws, 2, 1, 2, 8,
-                 f"Generated: {run_time}   |   Objective: {config.get('RECOMMEND_OBJECTIVE', '—')}",
+                 f"Generated: {run_time}   |   Container: {ctype} ({L}×{W}×{H} cm, door {Hdoor} cm)   |   Objective: {config.get('RECOMMEND_OBJECTIVE', '—')}",
                  fg="666666", size=9, h="center", bg=_LIGHT_GRAY)
     ws.row_dimensions[2].height = 16
     ws.row_dimensions[3].height = 8
@@ -303,9 +305,10 @@ def _write_details(ws, containers, config):
     for i, w in enumerate(col_widths):
         ws.column_dimensions[get_column_letter(i + 1)].width = w
 
-    L     = config.get("CONTAINER_LENGTH_CM", 1203)
-    W     = config.get("CONTAINER_WIDTH_CM", 235)
-    Hdoor = config.get("CONTAINER_DOOR_HEIGHT_CM", 250)
+    L     = config.get("CONTAINER_LENGTH_CM",     1203)
+    W     = config.get("CONTAINER_WIDTH_CM",       235)
+    H     = config.get("CONTAINER_HEIGHT_CM",      269)
+    Hdoor = config.get("CONTAINER_DOOR_HEIGHT_CM", 259)
 
     HEADERS = ["Type", "Product / Block", "Y Start (cm)",
                "Length (cm)", "Height (cm)", "Weight (kg)", "Count"]
@@ -450,18 +453,18 @@ def _color_layout_range(ws, row: int, y_start_cm: int, length_cm: int,
         lbl_cell.alignment = _align(h="left", v="center")
 
 
-def _scale_row_height(max_h_cm: int) -> int:
+def _scale_row_height(max_h_cm: int, container_h_cm: int = 269) -> int:
     """Map block height in cm to a row pixel height for the layout grid."""
-    # 270 cm container maps to 56px; floor at 22px
-    return max(22, min(56, int(max_h_cm * 56 / 270)))
+    return max(22, min(56, int(max_h_cm * 56 / container_h_cm)))
 
 
 def _write_layout(ws, containers, recs, config):
     ws.sheet_view.showGridLines = False
 
-    L     = config.get("CONTAINER_LENGTH_CM", 1203)
-    W     = config.get("CONTAINER_WIDTH_CM", 235)
-    Hdoor = config.get("CONTAINER_DOOR_HEIGHT_CM", 250)
+    L     = config.get("CONTAINER_LENGTH_CM",     1203)
+    W     = config.get("CONTAINER_WIDTH_CM",       235)
+    H     = config.get("CONTAINER_HEIGHT_CM",      269)
+    Hdoor = config.get("CONTAINER_DOOR_HEIGHT_CM", 259)
     n_layout_cols = _layout_col_count(L)
     total_cols    = _LAYOUT_LABEL_COLS + n_layout_cols + 1
 
@@ -545,7 +548,7 @@ def _write_layout(ws, containers, recs, config):
         # Max block height drives row height (visual height cue)
         all_heights = [r["height_cm"] for r in rows_data] or [0]
         max_h = max(all_heights)
-        main_row_h = _scale_row_height(max_h)
+        main_row_h = _scale_row_height(max_h, H)
 
         main_row = cur_row
         rec_row  = (cur_row + 1) if has_recs else None

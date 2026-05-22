@@ -65,16 +65,46 @@ def classify_height_band(h_cm: int) -> str:
 
 
 # ---------- 3) Build block type table ----------
-def build_block_type_table(Hdoor_cm: int) -> Dict[str, BlockType]:
+
+# Standard EU/ISO pallet footprints: (L, W, allow_rotate).
+# L >= W by convention.  allow_rotate=True means both orientations
+# produce valid row lengths (the pallet can face either way along the
+# container depth axis).
+_PALLET_FOOTPRINTS: List[Tuple[int, int, bool]] = [
+    (115, 115, False),
+    (115, 108, True),
+    (115,  77, True),
+    ( 77,  77, False),
+]
+
+# Height bands: (name, band_max_h_cm).
+# band_max_h is used to compute how many layers fit in the container
+# and as a conservative block-height estimate.
+_HEIGHT_BANDS: List[Tuple[str, int]] = [
+    ("<66",     65),
+    ("66-89",   89),
+    ("89-130", 130),
+    (">130",   230),  # single-stack tall pallets; 230 cm is conservative
+    ("230",    230),  # special band for near-container-height pallets
+]
+
+
+def build_block_type_table(W_cm: int, H_cm: int, Hdoor_cm: int) -> Dict[str, BlockType]:
     """
-    Encodes your table as BlockType entries.
-    block_height_cm should be conservative.
-    Rotation: we allow both orientations by letting allowed_lengths include both sides when meaningful.
+    Build the block-type lookup table from container dimensions.
+
+    For each pallet footprint (L, W) and height band:
+      pallets_across    = W_cm // L          (conservative: large footprint dim as depth)
+      stack_count       = max(1, H_cm // band_max_h)
+      pallets_per_block = pallets_across * stack_count
+      block_height_cm   = stack_count * band_max_h   (conservative upper estimate)
+
+    The "230" special band is only added when H_cm >= 230.
     """
     table: Dict[str, BlockType] = {}
 
-    def add(foot: Tuple[int,int], band: str, pallets_per_block: int, stack_count: int, block_height_cm: int,
-            allow_rotate: bool):
+    def add(foot: Tuple[int, int], band: str, pallets_per_block: int,
+            stack_count: int, block_height_cm: int, allow_rotate: bool) -> None:
         L, W = foot
         lengths = (L, W) if allow_rotate and L != W else (L,)
         key = f"{L}x{W}|{band}"
@@ -84,39 +114,23 @@ def build_block_type_table(Hdoor_cm: int) -> Dict[str, BlockType]:
             pallets_per_block=pallets_per_block,
             block_height_cm=block_height_cm,
             stack_count=stack_count,
-            allowed_lengths=tuple(sorted(set(lengths), reverse=True))
+            allowed_lengths=tuple(sorted(set(lengths), reverse=True)),
         )
 
-    # ── 115×115  (floor(234/115) = 2 across) ──────────────────────────────
-    # 4 stacks × 2 across = 8 | 3×2=6 | 2×2=4 | 1×2=2
-    add((115,115), "<66",   8, 4, 4*65,  allow_rotate=False)
-    add((115,115), "66-89", 6, 3, 3*89,  allow_rotate=False)
-    add((115,115), "89-130",4, 2, 2*130, allow_rotate=False)
-    add((115,115), ">130",  2, 1, 230,   allow_rotate=False)  # single stack, too tall to double
-    add((115,115), "230",   2, 1, 230,   allow_rotate=False)
+    for L, W, allow_rotate in _PALLET_FOOTPRINTS:
+        # Conservative: use the larger footprint dimension as row depth,
+        # so pallets_across uses the smaller clearance direction.
+        pallets_across = W_cm // L
+        if pallets_across < 1:
+            continue  # pallet too wide for this container
 
-    # ── 115×108  (floor(234/115)=2 or floor(234/108)=2; both give 2 across) ─
-    add((115,108), "<66",   8, 4, 4*65,  allow_rotate=True)
-    add((115,108), "66-89", 6, 3, 3*89,  allow_rotate=True)
-    add((115,108), "89-130",4, 2, 2*130, allow_rotate=True)
-    add((115,108), ">130",  2, 1, 230,   allow_rotate=True)
-    add((115,108), "230",   2, 1, 230,   allow_rotate=True)
-
-    # ── 115×77  (depth=77 → 115cm faces width → 2 across; depth=115 → 3 across)
-    # pallets_per_block fixed at the 2-across orientation for conservative counting
-    add((115,77),  "<66",   8, 4, 4*65,  allow_rotate=True)  # 4 stacks × 2 across
-    add((115,77),  "66-89", 6, 3, 3*89,  allow_rotate=True)  # 3 stacks × 2 across
-    add((115,77),  "89-130",4, 2, 2*130, allow_rotate=True)  # 2 stacks × 2 across
-    add((115,77),  ">130",  2, 1, 230,   allow_rotate=True)  # 1 stack  × 2 across
-    add((115,77),  "230",   2, 1, 230,   allow_rotate=True)
-
-    # ── 77×77  (floor(234/77) = 3 across) ──────────────────────────────────
-    # 3 stacks × 3 across = 9 | 2×3=6 | 1×3=3
-    add((77,77), "<66",   9, 3, 3*89,  allow_rotate=False)   # same stack count as 66-89
-    add((77,77), "66-89", 9, 3, 3*89,  allow_rotate=False)
-    add((77,77), "89-130",6, 2, 2*130, allow_rotate=False)
-    add((77,77), ">130",  3, 1, 230,   allow_rotate=False)
-    add((77,77), "230",   3, 1, 230,   allow_rotate=False)
+        for band_name, band_max_h in _HEIGHT_BANDS:
+            if band_name == "230" and H_cm < 230:
+                continue  # container too short for near-container-height pallets
+            stack_count       = max(1, H_cm // band_max_h)
+            pallets_per_block = pallets_across * stack_count
+            block_height_cm   = stack_count * band_max_h
+            add((L, W), band_name, pallets_per_block, stack_count, block_height_cm, allow_rotate)
 
     return table
 
@@ -124,6 +138,8 @@ def build_block_type_table(Hdoor_cm: int) -> Dict[str, BlockType]:
 # ---------- 4) Main function: pallets -> blocks ----------
 def build_row_blocks_from_pallets(
     meta_per_pallet: List[Dict[str,Any]],
+    W_cm: int,
+    H_cm: int,
     Hdoor_cm: int,
     tol_cm: int = 2,
     require_multiples: bool = True
@@ -134,7 +150,7 @@ def build_row_blocks_from_pallets(
       recommendations: dict type_key -> how many pallets to add to reach next multiple
       warnings: list of strings for any rejected pallets/types
     """
-    type_table = build_block_type_table(Hdoor_cm)
+    type_table = build_block_type_table(W_cm, H_cm, Hdoor_cm)
     buckets: Dict[str, List[Dict[str,Any]]] = {}
     warnings: List[str] = []
 
@@ -155,10 +171,28 @@ def build_row_blocks_from_pallets(
 
         buckets.setdefault(key, []).append(pm)
 
+    # 1b) Determine effective stacking per bucket.
+    # When double-stacking would exceed the door height, reduce to single-stack so
+    # the block can still pass through the door (a single 128 cm pallet fits through a
+    # 250 cm door even though two stacked at 256 cm would not).
+    eff_stack:  Dict[str, int] = {}
+    eff_ppb:    Dict[str, int] = {}
+    for key, plist in buckets.items():
+        bt = type_table[key]
+        max_h = max(int(pm["height"]) for pm in plist)
+        if bt.stack_count > 1 and bt.stack_count * max_h > Hdoor_cm:
+            # Use as many layers as fit through the door (minimum 1)
+            es = max(1, Hdoor_cm // max_h)
+            eff_stack[key] = es
+            eff_ppb[key]   = max(1, bt.pallets_per_block // bt.stack_count * es)
+        else:
+            eff_stack[key] = bt.stack_count
+            eff_ppb[key]   = bt.pallets_per_block
+
     # 2) compute recommendations for multiples
     recommendations: Dict[str,int] = {}
     for key, plist in buckets.items():
-        k = type_table[key].pallets_per_block
+        k = eff_ppb[key]
         rem = len(plist) % k
         if rem != 0:
             recommendations[key] = (k - rem)
@@ -172,7 +206,8 @@ def build_row_blocks_from_pallets(
     block_id = 1
     for key, plist in buckets.items():
         bt = type_table[key]
-        k = bt.pallets_per_block
+        k  = eff_ppb[key]
+        es = eff_stack[key]
 
         # chunk into groups of size k
         for start in range(0, len(plist), k):
@@ -185,18 +220,9 @@ def build_row_blocks_from_pallets(
             for pm in chunk:
                 w_sum += float(pm.get("weight_kg") or 0.0)
 
-            # choose block length later (rotation handling)
-            # We'll create one block instance per allowed length option.
-            # BUT: to avoid double-picking, we create a group_id concept (block_physical_id)
-            # and the solver must enforce at most one chosen per group.
             for Lopt in bt.allowed_lengths:
-                # Compute row-block height from actual pallet heights in this chunk (cm).
-
-
-                # Conservative inside this block: use tallest pallet height.
-                max_pallet_h = max(int(pm["height"]) for pm in chunk)
-                block_height_cm = bt.stack_count * max_pallet_h
-
+                max_pallet_h  = max(int(pm["height"]) for pm in chunk)
+                block_height_cm = es * max_pallet_h
 
                 blocks.append(BlockInstance(
                     block_id=block_id,

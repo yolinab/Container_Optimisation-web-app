@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Container Optimizer — Architecture</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: "Segoe UI", -apple-system, sans-serif;
+      background: #F5F4F1;
+      color: #0F0F0F;
+      padding: 2rem;
+    }
+    h1 {
+      font-size: 1.4rem;
+      font-weight: 700;
+      margin-bottom: 0.25rem;
+      letter-spacing: -0.02em;
+    }
+    p.subtitle {
+      font-size: 0.85rem;
+      color: #5C5C5C;
+      margin-bottom: 2rem;
+    }
+    .diagram-wrap {
+      background: #fff;
+      border: 1px solid #E0DDD8;
+      border-radius: 8px;
+      padding: 2rem;
+      overflow-x: auto;
+    }
+    .mermaid { min-width: 900px; }
+  </style>
+</head>
+<body>
+  <h1>Container Packing Optimizer — Architecture</h1>
+  <p class="subtitle">Data flow from Excel upload through OR-Tools solver to browser output</p>
+
+  <div class="diagram-wrap">
+    <div class="mermaid">
+flowchart TD
+
+  %% ── Entry ──────────────────────────────────────────────────────────
+  subgraph ENTRY["Entry Points"]
+    direction LR
+    UI["🌐 Browser UI\nstatic/index.html\nDrag-and-drop .xlsx"]
+  end
+
+  %% ── Web layer ───────────────────────────────────────────────────────
+  subgraph API["Web Layer — api.py  (FastAPI)"]
+    direction TB
+    R1["GET /\nServe index.html"]
+    R2["GET /faq"]
+    R3["GET /health"]
+    R4["POST /optimize\nAccepts .xlsx upload"]
+    R5["POST /report-bug\n→ GitHub Issues API\n(GITHUB_TOKEN env var)"]
+  end
+
+  %% ── Config ──────────────────────────────────────────────────────────
+  subgraph CFG["config.py  (env-var overrides)"]
+    direction LR
+    C1["L = 1203 cm\nW = 235 cm\nH = 270 cm"]
+    C2["Door = 250 cm\nWmax = 18 000 kg\nGap = 5 cm"]
+    C3["Solver limit = 3 s\nObjective = min_leftover"]
+  end
+
+  %% ── Pipeline ────────────────────────────────────────────────────────
+  subgraph PIPE["pipeline.py — run_pipeline()"]
+    direction TB
+
+    subgraph S1["Step 1 · Parse Excel"]
+      PA["parse_pallet_excel_v3()\n• Auto-detects header row\n• Fuzzy column name matching\n• Supports . and , decimals\n→ meta_per_pallet list"]
+      PB["parse_np_boxes_excel_v3()\n• Rows where type = 'NP'\n→ np_boxes list"]
+    end
+
+    subgraph S2["Step 2 · Build Row-Blocks  (oneDbuildblocks.py)"]
+      BB1["canonical_footprint()\nMaps raw dims → nearest\n115×115 / 115×108 / 115×77 / 77×77\n(±2 cm tolerance)"]
+      BB2["classify_height_band()\n&lt;66 / 66-89 / 89-130 / &gt;130 / 230 cm"]
+      BB3["build_block_type_table()\n20 named block types\ne.g. '115x115|89-130'\n→ 4 pallets / block, stack=2"]
+      BB4["Pallets grouped into BlockInstance[]\n⚠ Count must be exact multiple\nor pipeline raises with fix hint"]
+      BB1 --> BB2 --> BB3 --> BB4
+    end
+
+    subgraph S3["Step 3 · Greedy Container Loop  (max 30 containers)"]
+      SL["For each container pass:\n• Separate door_ok vs door_over blocks\n• Offer correct subset to solver\n• Remove chosen blocks from pool\n• Loop until pool is empty"]
+      subgraph SOLVER["A_1D_multi_container_placement.py  (OR-Tools CP-SAT)"]
+        direction LR
+        SV1["Variables\nslot[r] ∈ {0 … N}\none per row position"]
+        SV2["Hard Constraints\n• Σ lengths + gaps ≤ L\n• Σ weights ≤ Wmax\n• Heights non-increasing\n  back → door\n• Last row ≤ Hdoor"]
+        SV3["Objective\nmax 1 000 000 × pallets\n        + usedLen\n(seed=42, 1 worker)"]
+        SV1 --> SV2 --> SV3
+      end
+      SL --> SOLVER
+    end
+
+    subgraph S4["Step 4 · NP Box Packing  (box_packing.py)"]
+      BX["BoxPacker.pack()\n• Fills tail zone (after pallet rows)\n• Column-based: W×H cross-section\n  packed with multiple box types\n• Tries all 6 box orientations\n• Weight budget respected\n→ adds box_zones to containers"]
+    end
+
+    subgraph S4B["Step 4b · Validation  (validate.py)"]
+      VL["8 checks (ERROR stops pipeline):\n1. Every block packed exactly once\n2. Pallet count conserved\n3. Container not over-length\n4. Door-height on last row\n5. Weight not exceeded\n6. Y-coordinates consistent\n7. NP box quantities correct\n8. Non-last containers ≥ 50% filled"]
+    end
+
+    subgraph S5["Step 5 · Fill Recommendations  (recommend.py)"]
+      RC["recommend_fill_containers()\nTwo zones per container:\n• Tail — after last pallet row\n  (pallets + NP boxes, 2-D fill)\n• Atop — headroom above each row\n  (pallets only, no boxes on pallets)\nProportional to global order qty"]
+    end
+
+    subgraph S6["Step 6 · Export"]
+      EX["export_excel_report()  (export_excel.py)\n4 sheets: Overview · Details\n  Packing Layout · Recommendations"]
+      VZ["render_container_to_png_b64()  (visualize_row_blocks.py)\nmatplotlib 3-D render → PNG → base64\nOne image per container"]
+    end
+
+    S1 --> S2 --> S3 --> S4 --> S4B --> S5 --> S6
+  end
+
+  %% ── Output ──────────────────────────────────────────────────────────
+  subgraph OUT["JSON Response to Browser"]
+    direction LR
+    O1["report_b64\n(Excel download)"]
+    O2["layout_data\n(2-D strip view)"]
+    O3["container_images\n(3-D PNGs)"]
+    O4["overall_decisions\nwarnings / errors"]
+  end
+
+  %% ── Connections ─────────────────────────────────────────────────────
+  UI -->|"POST /optimize\n.xlsx file"| R4
+  R4 --> PIPE
+  CFG -->|"L, W, H, Door,\nWmax, Gap, Tlimit"| S3
+  CFG -->|"W, H, Door"| S4
+  CFG -->|"dimensions"| VZ
+  PIPE -->|"JSON"| OUT
+  OUT -->|"render"| UI
+
+  %% ── Styles ──────────────────────────────────────────────────────────
+  classDef entryStyle  fill:#145C35,stroke:#0E4226,color:#fff,rx:6
+  classDef apiStyle    fill:#1A3A5C,stroke:#112840,color:#fff,rx:6
+  classDef cfgStyle    fill:#4A235A,stroke:#32174A,color:#fff,rx:6
+  classDef solverStyle fill:#7B3F00,stroke:#5C2E00,color:#fff,rx:6
+  classDef outStyle    fill:#1A3A5C,stroke:#112840,color:#fff,rx:6
+  classDef stepStyle   fill:#EBF5FB,stroke:#2E6DA4,color:#0F0F0F,rx:4
+
+  class UI entryStyle
+  class R1,R2,R3,R4,R5 apiStyle
+  class C1,C2,C3 cfgStyle
+  class SV1,SV2,SV3 solverStyle
+  class O1,O2,O3,O4 outStyle
+  class PA,PB,BB1,BB2,BB3,BB4,SL,BX,VL,RC,EX,VZ stepStyle
+    </div>
+  </div>
+
+  <script>
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: 'base',
+      themeVariables: {
+        fontSize: '13px',
+        fontFamily: '"Segoe UI", -apple-system, sans-serif',
+        primaryColor: '#D6E4F0',
+        primaryTextColor: '#0F0F0F',
+        primaryBorderColor: '#2E6DA4',
+        lineColor: '#5C5C5C',
+        clusterBkg: '#FAFAF8',
+        clusterBorder: '#D0CCC5',
+        edgeLabelBackground: '#F5F4F1',
+      },
+      flowchart: {
+        curve: 'basis',
+        padding: 20,
+        nodeSpacing: 40,
+        rankSpacing: 60,
+      },
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,803 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Container Packing Optimizer — Rules &amp; Logic</title>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    /* ── Reset ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    /* ── Screen base ── */
+    :root {
+      --ink:       #0F0F0F;
+      --mid:       #4A4A4A;
+      --light:     #7A7A7A;
+      --border:    #DCDAD6;
+      --bg:        #F5F4F1;
+      --white:     #FFFFFF;
+      --green:     #145C35;
+      --green-lt:  #EDF7F1;
+      --navy:      #1A3A5C;
+      --navy-lt:   #EBF5FB;
+      --amber:     #7B3F00;
+      --amber-lt:  #FDF3E7;
+      --red:       #7A1C1C;
+      --red-lt:    #FDF0F0;
+      --purple:    #4A235A;
+      --purple-lt: #F9F0FF;
+    }
+
+    body {
+      font-family: "Inter", -apple-system, sans-serif;
+      font-size: 13.5px;
+      line-height: 1.6;
+      color: var(--ink);
+      background: var(--bg);
+      padding: 0;
+    }
+
+    /* ── Page wrapper (screen) ── */
+    .page {
+      max-width: 820px;
+      margin: 2.5rem auto;
+      background: var(--white);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      overflow: hidden;
+    }
+
+    /* ── Cover strip ── */
+    .cover {
+      background: var(--ink);
+      color: #fff;
+      padding: 2.5rem 2.5rem 2rem;
+    }
+    .cover-label {
+      font-size: 0.7rem;
+      font-weight: 600;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      opacity: 0.55;
+      margin-bottom: 0.6rem;
+    }
+    .cover h1 {
+      font-size: 1.8rem;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      line-height: 1.15;
+      margin-bottom: 0.6rem;
+    }
+    .cover p {
+      font-size: 0.88rem;
+      opacity: 0.65;
+      max-width: 520px;
+    }
+    .cover-meta {
+      margin-top: 1.5rem;
+      display: flex;
+      gap: 2rem;
+      font-size: 0.78rem;
+      opacity: 0.5;
+    }
+
+    /* ── Body content ── */
+    .body { padding: 2.5rem; }
+
+    /* ── Section headings ── */
+    h2 {
+      font-size: 1rem;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      color: var(--ink);
+      margin: 2.5rem 0 0.8rem;
+      padding-bottom: 0.4rem;
+      border-bottom: 2px solid var(--ink);
+    }
+    h2:first-child { margin-top: 0; }
+
+    h3 {
+      font-size: 0.88rem;
+      font-weight: 700;
+      color: var(--mid);
+      margin: 1.4rem 0 0.5rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    p { margin-bottom: 0.7rem; color: var(--mid); }
+    p strong { color: var(--ink); }
+
+    /* ── Callout boxes ── */
+    .box {
+      border-radius: 8px;
+      padding: 0.9rem 1.1rem;
+      margin: 1rem 0;
+      font-size: 0.84rem;
+      line-height: 1.55;
+    }
+    .box-title {
+      font-weight: 700;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      margin-bottom: 0.35rem;
+    }
+    .box.green  { background: var(--green-lt);  border-left: 3px solid var(--green);  color: #1A4A2A; }
+    .box.navy   { background: var(--navy-lt);   border-left: 3px solid var(--navy);   color: #112840; }
+    .box.amber  { background: var(--amber-lt);  border-left: 3px solid var(--amber);  color: #5C2E00; }
+    .box.red    { background: var(--red-lt);    border-left: 3px solid var(--red);    color: #5C1414; }
+    .box.purple { background: var(--purple-lt); border-left: 3px solid var(--purple); color: #32174A; }
+    .box.gray   { background: #F5F4F1;          border-left: 3px solid #9A9A9A;       color: var(--mid); }
+
+    /* ── Tables ── */
+    .tbl-wrap { overflow-x: auto; margin: 1rem 0; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.82rem;
+    }
+    thead th {
+      background: var(--ink);
+      color: #fff;
+      font-weight: 600;
+      text-align: left;
+      padding: 0.5rem 0.75rem;
+      letter-spacing: 0.02em;
+    }
+    tbody tr:nth-child(even) { background: #FAFAF8; }
+    tbody td {
+      padding: 0.45rem 0.75rem;
+      border-bottom: 1px solid var(--border);
+      color: var(--mid);
+      vertical-align: top;
+    }
+    tbody td strong { color: var(--ink); }
+    tbody tr:last-child td { border-bottom: none; }
+
+    /* ── Pill tags ── */
+    .pill {
+      display: inline-block;
+      background: #F0EEEB;
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 0.15rem 0.55rem;
+      font-size: 0.75rem;
+      font-weight: 500;
+      color: var(--mid);
+      margin: 0.1rem 0.1rem;
+    }
+    .pill.ok     { background: var(--green-lt); border-color: #A8D8BA; color: var(--green); }
+    .pill.no     { background: var(--red-lt);   border-color: #F0C0C0; color: var(--red); }
+    .pill.warn   { background: var(--amber-lt); border-color: #E8C080; color: var(--amber); }
+
+    /* ── Diagram: container cross-section ASCII ── */
+    .diagram {
+      background: #FAFAF8;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      font-family: "SF Mono", "Fira Code", "Courier New", monospace;
+      font-size: 0.78rem;
+      line-height: 1.6;
+      color: var(--mid);
+      overflow-x: auto;
+      margin: 1rem 0;
+    }
+    .diagram b { color: var(--ink); }
+
+    /* ── Page-break hints for print ── */
+    .break-before { page-break-before: always; }
+
+    /* ── Inline highlight ── */
+    code {
+      background: #F0EEEB;
+      border-radius: 3px;
+      padding: 0.1em 0.35em;
+      font-size: 0.85em;
+      font-family: "SF Mono", "Fira Code", monospace;
+      color: var(--ink);
+    }
+
+    ul, ol { margin: 0.4rem 0 0.8rem 1.3rem; color: var(--mid); }
+    li { margin-bottom: 0.25rem; }
+    li strong { color: var(--ink); }
+
+    /* ── Divider ── */
+    hr { border: none; border-top: 1px solid var(--border); margin: 1.5rem 0; }
+
+    /* ── Footer ── */
+    .footer {
+      background: #FAFAF8;
+      border-top: 1px solid var(--border);
+      padding: 1rem 2.5rem;
+      font-size: 0.75rem;
+      color: var(--light);
+      display: flex;
+      justify-content: space-between;
+    }
+
+    /* ════════════════════════════════════════
+       PRINT STYLES
+       ════════════════════════════════════════ */
+    @media print {
+      @page { margin: 18mm 16mm; size: A4; }
+
+      body { background: #fff; font-size: 12px; }
+
+      .page {
+        max-width: none;
+        margin: 0;
+        border: none;
+        border-radius: 0;
+        box-shadow: none;
+      }
+
+      .cover { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+      h2 { page-break-after: avoid; }
+      h3 { page-break-after: avoid; }
+      table { page-break-inside: avoid; }
+      .box  { page-break-inside: avoid; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .diagram { page-break-inside: avoid; }
+
+      thead th { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      tbody tr:nth-child(even) { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+      .pill.ok, .pill.no, .pill.warn {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
+
+      .footer { display: none; }
+    }
+  </style>
+</head>
+<body>
+<div class="page">
+
+  <!-- ── Cover ─────────────────────────────────────────────── -->
+  <div class="cover">
+    <div class="cover-label">Internal Reference Document</div>
+    <h1>Container Packing Optimizer<br>Rules &amp; Stacking Logic</h1>
+    <p>A complete reference for how pallets and boxes are grouped, stacked, ordered, and validated — including all constraints, edge cases, and what the system cannot handle.</p>
+    <div class="cover-meta">
+      <span>Edelman — Logistics Optimization</span>
+      <span>May 2026</span>
+    </div>
+  </div>
+
+  <div class="body">
+
+    <!-- ══════════════════════════════════════════════════════ -->
+    <h2>1. Container Dimensions &amp; Physical Limits</h2>
+
+    <p>All calculations are based on a standard 40-foot high-cube shipping container with the following <strong>internal</strong> dimensions. Every constraint in the system is derived from these numbers.</p>
+
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Parameter</th>
+            <th>Default Value</th>
+            <th>What It Controls</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td><strong>Internal length</strong></td><td>1 203 cm</td><td>How many pallet rows fit end-to-end</td></tr>
+          <tr><td><strong>Internal width</strong></td><td>235 cm</td><td>How many pallets fit side-by-side across</td></tr>
+          <tr><td><strong>Internal height</strong></td><td>270 cm</td><td>Maximum stack height inside the container</td></tr>
+          <tr><td><strong>Door opening height</strong></td><td>250 cm</td><td>Maximum height of the row nearest the door</td></tr>
+          <tr><td><strong>Max payload weight</strong></td><td>18 000 kg</td><td>Combined weight of all rows in one container</td></tr>
+          <tr><td><strong>Gap between rows</strong></td><td>5 cm</td><td>Forklift clearance between consecutive pallet rows</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="box gray">
+      <div class="box-title">Overridable via Environment Variables</div>
+      All six values above are defaults only. Any of them can be changed by setting the corresponding environment variable on the server (<code>CONTAINER_LENGTH_CM</code>, <code>CONTAINER_WIDTH_CM</code>, etc.) without touching any code.
+    </div>
+
+    <div class="diagram">
+<b>Container top view (length axis = Y, width axis = X):</b>
+
+  ┌─────────────────────────────────────────────────────────┐ ▲
+  │   BACK OF CONTAINER              DOOR END               │ │
+  │                                                         │ │ 235 cm
+  │  [Row 1 — tallest]  [Row 2]  …  [Row N — shortest]  ←🚪│ │  width
+  │                                                         │ │
+  └─────────────────────────────────────────────────────────┘ ▼
+  ◄──────────────────── 1 203 cm ──────────────────────────►
+
+Rows are placed back-to-front. Each row spans the full 235 cm width.
+The last row (nearest the door) must be short enough to pass through the 250 cm opening.
+    </div>
+
+
+    <!-- ══════════════════════════════════════════════════════ -->
+    <h2>2. Pallet Footprints — What Is Supported</h2>
+
+    <p>The system recognises <strong>four pallet footprints</strong>. Any pallet whose dimensions do not match one of these (within a ±2 cm tolerance) is silently skipped and excluded from the optimisation. A warning is printed but the run continues.</p>
+
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Footprint (L × W)</th>
+            <th>Typical label</th>
+            <th>Pallets across 235 cm width</th>
+            <th>Can rotate?</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>115 × 115 cm</strong></td>
+            <td>A2</td>
+            <td>2 pallets (2 × 115 = 230 cm ≤ 235 cm)</td>
+            <td>No (square — rotation has no effect)</td>
+          </tr>
+          <tr>
+            <td><strong>115 × 108 cm</strong></td>
+            <td>A1</td>
+            <td>2 pallets across (either orientation)</td>
+            <td>Yes — both orientations tried</td>
+          </tr>
+          <tr>
+            <td><strong>115 × 77 cm</strong></td>
+            <td>C2 / C3</td>
+            <td>2 pallets across (115 cm faces the width axis)</td>
+            <td>Yes — both orientations tried</td>
+          </tr>
+          <tr>
+            <td><strong>77 × 77 cm</strong></td>
+            <td>D2</td>
+            <td>3 pallets (3 × 77 = 231 cm ≤ 235 cm)</td>
+            <td>No (square)</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="box red">
+      <div class="box-title">Not Supported</div>
+      Any pallet footprint outside these four types — for example 100 × 100 cm or 120 × 80 cm — is <strong>dropped from the optimisation entirely</strong>. The run does not fail, but those pallets will not appear in any container. Always check the warnings in the output if your total pallet count seems lower than expected.
+    </div>
+
+    <div class="box amber">
+      <div class="box-title">Known Gap — 115 × 115 cm pallets taller than 130 cm</div>
+      The block-type table does not contain an entry for a 115 × 115 cm pallet with height &gt; 130 cm. Such pallets are silently dropped. The equivalent tall entry exists only for 115 × 77 cm. This is a hardcoded limitation that would need a code change to fix.
+    </div>
+
+
+    <!-- ══════════════════════════════════════════════════════ -->
+    <h2>3. Height Bands &amp; Stacking Rules</h2>
+
+    <p>Once the footprint is identified, each pallet is classified into a <strong>height band</strong> based on its individual pallet height. The band determines how many pallets can be stacked on top of each other, which in turn determines how many pallets form one row-block.</p>
+
+    <h3>Height Band Classification</h3>
+
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr><th>Band name</th><th>Pallet height range</th><th>Stacks high</th><th>Rationale</th></tr>
+        </thead>
+        <tbody>
+          <tr><td><strong>&lt; 66 cm</strong></td><td>Up to 65 cm</td><td>4</td><td>Very short pallets — four stacks fit comfortably under 270 cm</td></tr>
+          <tr><td><strong>66 – 89 cm</strong></td><td>66 cm to 89 cm</td><td>3</td><td>Three stacks reach up to 267 cm — fits inside the container</td></tr>
+          <tr><td><strong>89 – 130 cm</strong></td><td>90 cm to 130 cm</td><td>2</td><td>Two stacks: max 260 cm — within container height</td></tr>
+          <tr><td><strong>&gt; 130 cm</strong></td><td>131 cm to 229 cm</td><td>1</td><td>Too tall to stack — placed as single pallets</td></tr>
+          <tr><td><strong>230 cm</strong></td><td>Exactly 230 cm</td><td>1</td><td>Special band for floor-to-near-ceiling pallets</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="box green">
+      <div class="box-title">How Block Height Is Calculated</div>
+      The actual block height is: <strong>stack count × tallest individual pallet height in that block</strong>. For example: 4 pallets of 60 cm each, stacked 2 high (89–130 band) → block height = 2 × 60 = 120 cm. The tallest pallet in the batch is used conservatively.
+    </div>
+
+    <h3>Full Block-Type Table (Pallets per Row-Block)</h3>
+
+    <p>This table shows exactly how many pallets make up one row for each combination of footprint and height band. This is fixed in the code — it cannot be changed via configuration.</p>
+
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Footprint</th>
+            <th>Band &lt; 66 cm</th>
+            <th>Band 66 – 89 cm</th>
+            <th>Band 89 – 130 cm</th>
+            <th>Band &gt; 130 cm</th>
+            <th>Band 230 cm</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>115 × 115 cm</strong></td>
+            <td>8 pallets<br><small>(4 stacked × 2 across)</small></td>
+            <td>6 pallets<br><small>(3 × 2)</small></td>
+            <td>4 pallets<br><small>(2 × 2)</small></td>
+            <td>2 pallets<br><small>(1 × 2)</small></td>
+            <td>2 pallets<br><small>(1 × 2)</small></td>
+          </tr>
+          <tr>
+            <td><strong>115 × 108 cm</strong></td>
+            <td>8 pallets<br><small>(4 × 2)</small></td>
+            <td>6 pallets<br><small>(3 × 2)</small></td>
+            <td>4 pallets<br><small>(2 × 2)</small></td>
+            <td>2 pallets<br><small>(1 × 2)</small></td>
+            <td>2 pallets<br><small>(1 × 2)</small></td>
+          </tr>
+          <tr>
+            <td><strong>115 × 77 cm</strong></td>
+            <td>8 pallets<br><small>(4 × 2)</small></td>
+            <td>6 pallets<br><small>(3 × 2)</small></td>
+            <td>4 pallets<br><small>(2 × 2)</small></td>
+            <td>2 pallets<br><small>(1 × 2)</small></td>
+            <td>2 pallets<br><small>(1 × 2)</small></td>
+          </tr>
+          <tr>
+            <td><strong>77 × 77 cm</strong></td>
+            <td>9 pallets<br><small>(3 stacked × 3 across)</small></td>
+            <td>9 pallets<br><small>(3 × 3)</small></td>
+            <td>6 pallets<br><small>(2 × 3)</small></td>
+            <td>3 pallets<br><small>(1 × 3)</small></td>
+            <td>3 pallets<br><small>(1 × 3)</small></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="box navy">
+      <div class="box-title">Why the 77 × 77 &lt; 66 cm Band Has 9 Pallets</div>
+      Small 77 × 77 pallets shorter than 66 cm would theoretically stack 4 high (as other types do), giving 12 pallets per block. However the block height would be 4 × 65 = 260 cm — very close to the container ceiling. The table conservatively caps it at 3 stacks (9 pallets) to match the safer 66–89 rule. This is hardcoded.
+    </div>
+
+
+    <!-- ══════════════════════════════════════════════════════ -->
+    <h2>4. The Exact-Multiple Rule</h2>
+
+    <p>This is the <strong>most common reason an order fails to run</strong>. Your order quantity for each pallet type must be an exact multiple of the pallets-per-block number for that type.</p>
+
+    <div class="box red">
+      <div class="box-title">Rule</div>
+      <strong>order quantity mod pallets_per_block = 0</strong><br>
+      If even one pallet type violates this, the entire run is rejected. No containers are packed. The error message tells you exactly how many pallets to add for each type.
+    </div>
+
+    <h3>Examples</h3>
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr><th>Footprint</th><th>Height band</th><th>Block size</th><th>Valid quantities</th><th>Invalid (and fix)</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>115 × 115 cm</td><td>89 – 130 cm</td><td>4</td>
+            <td><span class="pill ok">4</span> <span class="pill ok">8</span> <span class="pill ok">12</span> <span class="pill ok">16</span></td>
+            <td><span class="pill no">7</span> → add 1 &nbsp; <span class="pill no">9</span> → add 3</td>
+          </tr>
+          <tr>
+            <td>115 × 115 cm</td><td>&lt; 66 cm</td><td>8</td>
+            <td><span class="pill ok">8</span> <span class="pill ok">16</span> <span class="pill ok">24</span></td>
+            <td><span class="pill no">7</span> → add 1 &nbsp; <span class="pill no">10</span> → add 6</td>
+          </tr>
+          <tr>
+            <td>77 × 77 cm</td><td>66 – 89 cm</td><td>9</td>
+            <td><span class="pill ok">9</span> <span class="pill ok">18</span> <span class="pill ok">27</span></td>
+            <td><span class="pill no">10</span> → add 8</td>
+          </tr>
+          <tr>
+            <td>115 × 77 cm</td><td>&gt; 130 cm</td><td>2</td>
+            <td><span class="pill ok">2</span> <span class="pill ok">4</span> <span class="pill ok">6</span></td>
+            <td><span class="pill no">1</span> → add 1 &nbsp; <span class="pill no">3</span> → add 1</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="box gray">
+      <div class="box-title">Why This Rule Exists</div>
+      A "row-block" is a physical unit: a set of pallets that form exactly one complete row across the container width. You cannot have half a row. If you ordered 7 pallets of a type that forms 8-pallet rows, there is no valid row to place — so the run refuses to continue rather than silently dropping a pallet.
+    </div>
+
+
+    <!-- ══════════════════════════════════════════════════════ -->
+    <h2 class="break-before">5. Loading Order — The Door Height Rule</h2>
+
+    <p>Rows inside a container must be arranged in <strong>non-increasing height order</strong> from the back of the container to the door. This is both a physical necessity (the door opening is 250 cm, smaller than the maximum container height of 270 cm) and a practical loading constraint.</p>
+
+    <div class="diagram">
+<b>Side view — mixed heights in one container:</b>
+
+  BACK                                            DOOR (250 cm opening)
+  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌─────────┐
+  │          │  │          │  │          │  │         │  ▲
+  │  Row 1   │  │  Row 2   │  │  Row 3   │  │  Row 4  │  │ 250 cm
+  │  250 cm  │  │  240 cm  │  │  200 cm  │  │  180 cm │  ▼
+  │          │  │          │  │          │  │         │
+  └──────────┘  └──────────┘  └──────────┘  └─────────┘  🚪
+  ◄──── loaded first, from the back ─────────────────────►
+
+  ✅  Allowed: heights decrease (or stay equal) towards the door.
+  ❌  Not allowed: a short row followed by a taller row closer to the door.
+    </div>
+
+    <h3>The Two-Category Split</h3>
+    <p>Rows are internally classified as:</p>
+    <ul>
+      <li><strong>door_ok</strong> — block height ≤ 250 cm. Can be placed in any position, including the door position.</li>
+      <li><strong>door_over</strong> — block height &gt; 250 cm. Can only be placed at the rear, never at the door position.</li>
+    </ul>
+
+    <div class="box amber">
+      <div class="box-title">What Happens When Both Types Are Present</div>
+      The solver ensures that all <code>door_over</code> rows go at the rear and at least one <code>door_ok</code> row is placed at the door. If a future container will also need a <code>door_ok</code> row, the system reserves one — it will not use all available short rows in the current container if doing so would leave a future container without a valid door row.
+    </div>
+
+    <div class="box red">
+      <div class="box-title">Fatal Error: No Door-Compliant Row Available</div>
+      If all remaining rows are taller than 250 cm and there are no shorter rows left to place at the door, the run fails with an error. This means it is physically impossible to close and seal the container. The fix is to either reduce pallet stack heights or split the order differently.
+    </div>
+
+
+    <!-- ══════════════════════════════════════════════════════ -->
+    <h2>6. The Optimiser — What It Maximises</h2>
+
+    <p>For each container pass, a mathematical optimiser (Google OR-Tools CP-SAT) chooses which row-blocks to load and in what order. It is not a simple greedy rule — it evaluates the problem as a whole within a time limit.</p>
+
+    <h3>Objective (priority order)</h3>
+    <ol>
+      <li><strong>Maximise the number of pallets loaded</strong> — getting as much of your order into this container as possible takes absolute priority.</li>
+      <li><strong>Maximise the length used</strong> — as a tiebreaker, the solver prefers arrangements that leave less wasted space at the back.</li>
+    </ol>
+
+    <h3>Hard Constraints (cannot be violated)</h3>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Constraint</th><th>Rule</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Length</strong></td><td>Sum of all row lengths + (number of gaps × 5 cm) ≤ 1 203 cm</td></tr>
+          <tr><td><strong>Weight</strong></td><td>Sum of all row weights ≤ 18 000 kg</td></tr>
+          <tr><td><strong>Height ordering</strong></td><td>Each row must be no taller than the row behind it (non-increasing, back → door)</td></tr>
+          <tr><td><strong>Door height</strong></td><td>The last (door-side) row must have height ≤ 250 cm</td></tr>
+          <tr><td><strong>No duplicates</strong></td><td>Each row-block can appear in at most one container</td></tr>
+          <tr><td><strong>Contiguity</strong></td><td>Empty row slots must be at the end — you cannot have a gap in the middle of a container</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="box navy">
+      <div class="box-title">Deterministic Results</div>
+      The solver always produces the same result for the same input. It runs with a fixed random seed (42) and a single search thread. The time limit is 3 seconds per container — sufficient for typical orders. Very large or complex orders may benefit from a higher time limit (set via <code>SOLVER_TIME_LIMIT_SEC</code>).
+    </div>
+
+    <h3>Container Loop</h3>
+    <p>The system repeatedly solves one container at a time until all row-blocks have been placed:</p>
+    <ol>
+      <li>Offer the remaining blocks to the solver.</li>
+      <li>The solver picks the best subset that fits in one container.</li>
+      <li>Those blocks are removed from the pool.</li>
+      <li>Repeat until the pool is empty or 30 containers are reached.</li>
+    </ol>
+
+    <div class="box red">
+      <div class="box-title">30-Container Safety Limit</div>
+      If the solver has not emptied the pool after 30 containers, the run is aborted. In practice this limit is never reached with real orders — hitting it usually indicates a problem with the input data.
+    </div>
+
+
+    <!-- ══════════════════════════════════════════════════════ -->
+    <h2 class="break-before">7. NP (Loose) Box Rules</h2>
+
+    <p>Rows in the Excel file marked with type code <code>NP</code> are treated as loose boxes — individual cartons rather than palletised loads. They are handled separately from pallet rows and have their own set of rules.</p>
+
+    <h3>What IS Possible</h3>
+    <ul>
+      <li><span class="pill ok">✓</span> Boxes are placed in the <strong>tail space</strong> — the unused length at the back of the container after all pallet rows.</li>
+      <li><span class="pill ok">✓</span> Multiple box types share the same tail section (column-based packing — no wasted dedicated zones per type).</li>
+      <li><span class="pill ok">✓</span> All six orientations of each box are tried to find the best fit.</li>
+      <li><span class="pill ok">✓</span> Boxes are stacked in the full 235 cm width × up to 250 cm height of the tail zone.</li>
+      <li><span class="pill ok">✓</span> Leftover boxes that don't fit in the first container carry over to subsequent containers.</li>
+      <li><span class="pill ok">✓</span> Box weight contributes to the container weight budget.</li>
+    </ul>
+
+    <h3>What Is NOT Possible</h3>
+    <ul>
+      <li><span class="pill no">✗</span> Boxes <strong>cannot be placed on top of pallet rows</strong> — only pallets can sit on top of pallets.</li>
+      <li><span class="pill no">✗</span> Boxes cannot be interleaved between pallet rows — tail only.</li>
+      <li><span class="pill no">✗</span> If there is no tail space in any container, boxes cannot be placed at all (a warning is issued).</li>
+    </ul>
+
+    <div class="diagram">
+<b>Container side view — NP boxes in the tail zone:</b>
+
+  BACK                         LAST ROW      TAIL SPACE         DOOR
+  ┌────────┐ ┌────────┐ ┌────────┐          ┌──────────────┐
+  │        │ │        │ │        │   5 cm    │ [Box A][A]   │
+  │ Row 1  │ │ Row 2  │ │ Row 3  │   gap     │ [Box B][B]   │
+  │        │ │        │ │        │    ←──    │ [A][A][B][B] │
+  └────────┘ └────────┘ └────────┘          └──────────────┘
+  ◄────── pallet zone ──────────────────────►◄─── NP zone ──►
+    </div>
+
+    <div class="box navy">
+      <div class="box-title">Column-Based Packing Algorithm</div>
+      The tail is filled one column at a time along the length axis. Each column uses the full width and height of the tail opening (235 × 250 cm). Within a column, box types are stacked in horizontal strips from the floor up, tallest type first. The column depth equals the largest box depth among all types being placed, so every type fits at least one layer. The cursor then advances by that depth and a new column begins.
+    </div>
+
+
+    <!-- ══════════════════════════════════════════════════════ -->
+    <h2>8. Fill Recommendations</h2>
+
+    <p>After the main packing is complete, the system identifies free zones in each container and recommends what you could add to your order to fill them. Recommendations are advisory — they do not change the packing plan.</p>
+
+    <h3>Two Free Zones per Container</h3>
+
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Zone</th><th>Where it is</th><th>What can go there</th><th>Ceiling height</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>Tail</strong></td>
+            <td>Unused length after the last pallet row</td>
+            <td>Pallet blocks AND NP boxes</td>
+            <td>250 cm (door height)</td>
+          </tr>
+          <tr>
+            <td><strong>Atop</strong></td>
+            <td>Headroom above each placed pallet row</td>
+            <td>Pallet blocks only (no boxes on pallets)</td>
+            <td>250 cm minus row height</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Proportional Allocation</h3>
+    <p>Pallet type recommendations in the tail zone are distributed proportionally to your existing order quantities. If you ordered 3× as many A2 pallets as C2 pallets, the tail recommendation will suggest roughly 3× as many A2 as C2 additions. This avoids recommending a large quantity of a pallet type you barely use.</p>
+
+    <div class="box green">
+      <div class="box-title">Recommendation Objectives</div>
+      The default objective is <strong>min_leftover</strong> — maximise the space filled. Alternatives available via the <code>RECOMMEND_OBJECTIVE</code> environment variable: <code>min_pallets</code> (fill with as few extra pallets as possible), <code>max_weight</code> (fill heaviest first), <code>max_value</code> (fill highest-FOB-price items first — requires FOB prices in the Excel file).
+    </div>
+
+
+    <!-- ══════════════════════════════════════════════════════ -->
+    <h2 class="break-before">9. Validation — Automatic Checks</h2>
+
+    <p>Every result is checked against eight rules before any report is produced. <strong>Errors stop the run</strong>; warnings are shown in the UI but the report is still generated.</p>
+
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>#</th><th>Check</th><th>Level</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr>
+            <td>1</td><td><strong>Block coverage</strong></td><td><span class="pill no">ERROR</span></td>
+            <td>Every block that entered the solver must appear in exactly one container — no block dropped, none duplicated.</td>
+          </tr>
+          <tr>
+            <td>2</td><td><strong>Pallet count</strong></td><td><span class="pill no">ERROR</span></td>
+            <td>Total pallets across all containers must equal total pallets from the input. Any discrepancy means pallets were lost or invented.</td>
+          </tr>
+          <tr>
+            <td>3</td><td><strong>Container over-length</strong></td><td><span class="pill no">ERROR</span></td>
+            <td>The sum of row lengths plus gaps must not exceed 1 203 cm (1 cm rounding tolerance allowed).</td>
+          </tr>
+          <tr>
+            <td>4</td><td><strong>Door height violation</strong></td><td><span class="pill no">ERROR</span></td>
+            <td>The last row in each container must have height ≤ 250 cm.</td>
+          </tr>
+          <tr>
+            <td>5</td><td><strong>Weight exceeded</strong></td><td><span class="pill no">ERROR</span></td>
+            <td>Loaded weight must not exceed 18 000 kg (0.5 kg rounding tolerance).</td>
+          </tr>
+          <tr>
+            <td>6</td><td><strong>Y-coordinate consistency</strong></td><td><span class="pill warn">WARNING</span></td>
+            <td>Each row's reported start position must equal the end of the previous row plus the 5 cm gap.</td>
+          </tr>
+          <tr>
+            <td>7</td><td><strong>NP box quantity</strong></td><td><span class="pill warn">WARNING</span></td>
+            <td>More boxes placed than ordered → ERROR. Fewer boxes placed than ordered → WARNING ("unplaced boxes").</td>
+          </tr>
+          <tr>
+            <td>8</td><td><strong>Low fill on non-last containers</strong></td><td><span class="pill warn">WARNING</span></td>
+            <td>A non-final container filled to less than 50% of its length is flagged as unusually low. This may indicate a data issue.</td>
+          </tr>
+          <tr>
+            <td>–</td><td><strong>Tall rows at rear</strong></td><td><span class="pill warn">WARNING</span></td>
+            <td>Informational: reports which containers have rows taller than the door loaded from the back. These require rear-loading equipment.</td>
+          </tr>
+          <tr>
+            <td>–</td><td><strong>Zero weight</strong></td><td><span class="pill warn">WARNING</span></td>
+            <td>If all containers report zero loaded weight, pallet weights are missing from the Excel — the weight constraint is effectively inactive.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+
+    <!-- ══════════════════════════════════════════════════════ -->
+    <h2>10. Input File Rules</h2>
+
+    <h3>Required Columns</h3>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Column</th><th>Accepted names (any match works)</th><th>Format</th></tr></thead>
+        <tbody>
+          <tr>
+            <td><strong>Dimensions</strong></td>
+            <td><code>Pallet and packing size</code>, <code>Pallet size</code>, <code>size</code></td>
+            <td><code>1,15x1,15x1,20</code> or <code>1.15x1.15x1.20</code> — metres, L×W×H</td>
+          </tr>
+          <tr>
+            <td><strong>Order quantity</strong></td>
+            <td><code>External Packaging Quantity</code>, <code>Order External Packaging Quantity</code>, <code>Total order full pallets</code>, <code>Total number of pallets</code>, and several others</td>
+            <td>Integer. Zero or blank rows are skipped.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Optional Columns (used if present)</h3>
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Column</th><th>Used for</th></tr></thead>
+        <tbody>
+          <tr><td><code>Pallet type</code> / <code>Pallet size</code> (type code)</td><td>Identifying NP rows (<code>NP</code> value) and product labels</td></tr>
+          <tr><td><code>Productname</code>, <code>Item</code></td><td>Human-readable labels in the report</td></tr>
+          <tr><td><code>Barcode</code></td><td>Labels in the report</td></tr>
+          <tr><td><code>External Net weight</code></td><td>Per-pallet weight — activates the weight constraint</td></tr>
+          <tr><td><code>Item price FOB</code></td><td>Enables the <code>max_value</code> recommendation objective</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Robustness Features</h3>
+    <ul>
+      <li><strong>Blank header rows:</strong> the system scans the sheet to find the actual header row — files with 1–2 blank rows at the top are handled automatically.</li>
+      <li><strong>Column name matching:</strong> prefix-based, case-insensitive, with whitespace normalisation. A column called "Ordered External  Packaging Quantity" (double space) will still be found.</li>
+      <li><strong>Decimal separator:</strong> both <code>1.15</code> (dot) and <code>1,15</code> (comma) are accepted in dimension strings.</li>
+      <li><strong>Mixed sheets:</strong> pallet rows and NP box rows can coexist on the same sheet — they are separated by the type code.</li>
+    </ul>
+
+
+    <!-- ══════════════════════════════════════════════════════ -->
+    <h2>11. Complete Summary — What Is and Is Not Possible</h2>
+
+    <div class="tbl-wrap">
+      <table>
+        <thead><tr><th>Scenario</th><th>Result</th></tr></thead>
+        <tbody>
+          <tr><td>Pallet footprint not in the known four types</td><td><span class="pill warn">Skipped silently</span> — warning printed</td></tr>
+          <tr><td>115 × 115 cm pallet taller than 130 cm</td><td><span class="pill warn">Skipped silently</span> — known limitation</td></tr>
+          <tr><td>Order quantity not a multiple of block size</td><td><span class="pill no">Run rejected</span> — told exactly how many to add</td></tr>
+          <tr><td>All remaining blocks taller than door opening</td><td><span class="pill no">Run rejected</span> — no valid container possible</td></tr>
+          <tr><td>Weight data missing from Excel</td><td><span class="pill warn">Weight constraint inactive</span> — warning issued</td></tr>
+          <tr><td>NP boxes that don't fit in any container tail</td><td><span class="pill warn">Warning</span> — unplaced boxes reported</td></tr>
+          <tr><td>NP boxes on top of pallet rows</td><td><span class="pill no">Not attempted</span> — architectural rule</td></tr>
+          <tr><td>Mixed pallet heights in one container</td><td><span class="pill ok">Supported</span> — tallest at rear, shortest at door</td></tr>
+          <tr><td>Multiple containers needed</td><td><span class="pill ok">Supported</span> — up to 30 containers</td></tr>
+          <tr><td>Rotation of rectangular pallets</td><td><span class="pill ok">Supported</span> — both orientations tried for 115×108 and 115×77</td></tr>
+          <tr><td>Blank rows or flexible column names in Excel</td><td><span class="pill ok">Supported</span> — auto-detected</td></tr>
+          <tr><td>Comma or dot decimal in dimension strings</td><td><span class="pill ok">Supported</span></td></tr>
+          <tr><td>FOB price recommendations</td><td><span class="pill ok">Supported</span> — set objective to <code>max_value</code></td></tr>
+          <tr><td>Overriding container dimensions</td><td><span class="pill ok">Supported</span> — via environment variables</td></tr>
+          <tr><td>More than 30 containers</td><td><span class="pill no">Safety limit</span> — run aborted</td></tr>
+          <tr><td>Non-integer pallet quantities</td><td><span class="pill warn">Truncated to integer</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+  </div><!-- /body -->
+
+  <div class="footer">
+    <span>Container Packing Optimizer — Internal Reference</span>
+    <span>To save as PDF: File → Print → Save as PDF (set margins to Default)</span>
+  </div>
+
+</div><!-- /page -->
+</body>
+</html>

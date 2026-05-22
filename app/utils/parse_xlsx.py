@@ -8,8 +8,8 @@ import re
 # Only columns actually read by the optimizer are listed here.
 # ────────────────────────────────────────────────────────────────────────────
 COLUMN_ALIASES: Dict[str, List[str]] = {
-    # Packing / type code — only the value "NP" is acted on (marks loose boxes).
-    # All other values (A1, A2, C2 …) are ignored by the optimiser.
+    # Packing / type code column.  Values that mark a row as a loose box
+    # are listed in _BOX_TYPE_VALUES below; all other values are ignored.
     "TYPE_CODE":    ["Packing", "Pallet type", "Pallet size"],
 
     # Physical dimensions string, e.g. "1.15x1.15x1.20"
@@ -39,6 +39,9 @@ COLUMN_ALIASES: Dict[str, List[str]] = {
     "WEIGHT":       ["External Net weight", "Net weight", "weight"],
     "PRICE_FOB":    ["Item price FOB", "price fob", "fob price", "item price", "unit price"],
 }
+# Values in the TYPE_CODE column that identify a row as a loose box (not a pallet).
+# Case-insensitive; add new spellings here as the input format evolves.
+_BOX_TYPE_VALUES: set = {"NP", "OUTER CARTON", "OUTER_CARTON", "OUTERCARTON"}
 # ─────────────────────────────────────────────────────────────────────────────
 
 def print_parsed_pallets(pallets_data):
@@ -76,34 +79,31 @@ def _find_col(df, candidates):
 
 def _parse_pallet_size_str(size_str: str) -> Tuple[int, int, int]:
     """
-    Parse a pallet size string like '1.15x1.15x1.01', '1.15x1.15x1.01cm',
-    or '1,15x1,15x1,01 ' into integer dimensions in centimetres.
+    Parse dimension strings in either of two formats:
 
-    Assumes the numbers are in metres with decimal separators '.' or ','.
+      Metres  (comma or dot decimal): '1,15x1,15x1,27'  → (115, 115, 127)
+      Centimetres (optional 'cm'):    '115x77x103cm'     → (115,  77, 103)
+
+    Detection rule: if the largest parsed number is < 10 the values are
+    treated as metres and multiplied by 100.  Otherwise they are already
+    in centimetres and are rounded to the nearest integer.
+    This safely handles all real-world pallet/box sizes (smallest box
+    in cm is always ≥ 10; metres are always < 3).
     """
     s = str(size_str).strip().lower()
-
-    # Remove units and other trailing text
-    s = s.replace("cm", "")
-
-    # Normalise decimal comma to dot
-    s = s.replace(",", ".")
-
-    # Split on x / X / ×
+    s = s.replace("cm", "").replace(",", ".")
     parts = re.split(r"[x×]", s)
     parts = [p.strip() for p in parts if p.strip()]
-
     if len(parts) != 3:
-        raise ValueError(f"Cannot parse pallet size string: '{size_str}'")
+        raise ValueError(f"Cannot parse dimension string: '{size_str}'")
 
-    # Convert metres to centimetres and round
-    def to_cm(p: str) -> int:
-        val = float(p)
-        return int(round(val * 100))
-
-    L = to_cm(parts[0])
-    W = to_cm(parts[1])
-    H = to_cm(parts[2])
+    values = [float(p) for p in parts]
+    if max(values) < 10.0:
+        # Metres — convert to centimetres
+        L, W, H = (int(round(v * 100)) for v in values)
+    else:
+        # Already centimetres
+        L, W, H = (int(round(v)) for v in values)
     return L, W, H
 
 
@@ -216,25 +216,6 @@ def _find_col_required(df: pd.DataFrame, candidates: List[str]) -> str:
     return col
 
 
-def _parse_pallet_size_str(size_str: str) -> Tuple[int, int, int]:
-    """
-    Parse strings like '1.15x1.15x1.01', '1,15x1,15x1,01', optionally with 'cm'.
-    Assumes metres -> converts to cm.
-    """
-    s = str(size_str).strip().lower()
-    s = s.replace("cm", "").replace(",", ".")
-    parts = re.split(r"[x×]", s)
-    parts = [p.strip() for p in parts if p.strip()]
-    if len(parts) != 3:
-        raise ValueError(f"Cannot parse pallet size string: '{size_str}'")
-
-    def to_cm(p: str) -> int:
-        return int(round(float(p) * 100))
-
-    L = to_cm(parts[0])
-    W = to_cm(parts[1])
-    H = to_cm(parts[2])
-    return L, W, H
 
 
 def parse_pallet_excel_v2(
@@ -407,7 +388,7 @@ def parse_np_boxes_excel_v3(
     col_weight = _find_col_optional(df, COLUMN_ALIASES["WEIGHT"])
 
     # Filter to NP rows
-    np_mask = df[col_type_code].astype(str).str.strip().str.upper() == "NP"
+    np_mask = df[col_type_code].astype(str).str.strip().str.upper().isin(_BOX_TYPE_VALUES)
     df_np = df[np_mask].copy()
 
     if df_np.empty:
@@ -563,7 +544,7 @@ def parse_pallet_excel_v3(
     # Exclude NP (loose box) rows — handled separately by parse_np_boxes_excel_v3
     col_type_code = _find_col_optional(df, COLUMN_ALIASES["TYPE_CODE"])
     if col_type_code:
-        np_mask = df[col_type_code].astype(str).str.strip().str.upper() == "NP"
+        np_mask = df[col_type_code].astype(str).str.strip().str.upper().isin(_BOX_TYPE_VALUES)
         df = df[~np_mask]
 
     # Clean rows

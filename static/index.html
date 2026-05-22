@@ -133,7 +133,8 @@
     }
 
     input[type="file"],
-    input[type="text"] {
+    input[type="text"],
+    select {
       width: 100%;
       padding: 0.6rem 0.75rem;
       border: 1.5px solid var(--border);
@@ -144,9 +145,11 @@
       font-family: inherit;
       outline: none;
       transition: border-color 0.12s;
+      cursor: pointer;
     }
     input[type="file"]:focus,
-    input[type="text"]:focus { border-color: var(--focus); }
+    input[type="text"]:focus,
+    select:focus { border-color: var(--focus); }
 
     .hint {
       font-size: 11.5px;
@@ -629,6 +632,15 @@
           <input type="file" id="file" name="file" accept=".xlsx,.xls" required />
         </div>
 
+        <div class="field">
+          <label for="containerType">Container type</label>
+          <select id="containerType" name="container_type">
+            <option value="40HC" selected>40HC &mdash; 40ft High Cube (269 cm tall)</option>
+            <option value="40FT">40FT &mdash; 40ft Standard (239 cm tall)</option>
+            <option value="20FT">20FT &mdash; 20ft Standard (239 cm tall)</option>
+          </select>
+        </div>
+
         <button type="submit" id="runBtn" class="btn btn-run">Run Optimizer</button>
       </form>
 
@@ -705,7 +717,8 @@
 
   <script>
     // ── Canvas layout drawing ─────────────────────────────────────────────
-    function drawLayout(containers, L_cm) {
+    function drawLayout(containers, L_cm, H_cm) {
+      H_cm = H_cm || 269;
       const section = document.getElementById('visSection');
       const canvas  = document.getElementById('layoutCanvas');
       const ctx     = canvas.getContext('2d');
@@ -728,7 +741,7 @@
 
       const rowHeights = containers.map(c => {
         const maxH = c.rows.reduce((m, r) => Math.max(m, r.h), 0) || 60;
-        return Math.max(MIN_ROW, Math.min(MAX_ROW, Math.round(maxH * MAX_ROW / 270)));
+        return Math.max(MIN_ROW, Math.min(MAX_ROW, Math.round(maxH * MAX_ROW / H_cm)));
       });
 
       const displayW = canvas.parentElement.clientWidth;
@@ -919,7 +932,7 @@
           if (json.layout_data && json.layout_data.length) {
             // Show section first so clientWidth is non-zero when canvas measures it
             document.getElementById('visSection').style.display = 'block';
-            setTimeout(() => drawLayout(json.layout_data, json.container_length_cm || 1203), 50);
+            setTimeout(() => drawLayout(json.layout_data, json.container_length_cm || 1203, json.container_height_cm || 269), 50);
           }
 
           // Packing decisions panel

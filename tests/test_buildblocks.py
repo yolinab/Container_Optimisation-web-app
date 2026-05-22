@@ -90,7 +90,7 @@ class TestBuildRowBlocks:
     def test_8_a2_pallets_make_1_block(self):
         """8 pallets of 115×115×120 → 1 block instance (89-130 band, stack=2)."""
         pallets = _make_pallets(115, 115, 120, 8)
-        blocks, recs, warnings = build_row_blocks_from_pallets(pallets, Hdoor_cm=HDOOR, require_multiples=True)
+        blocks, recs, warnings = build_row_blocks_from_pallets(pallets, W_cm=235, H_cm=269, Hdoor_cm=HDOOR, require_multiples=True)
         assert len(blocks) >= 1
         assert recs == {}
         assert warnings == []
@@ -98,14 +98,14 @@ class TestBuildRowBlocks:
     def test_4_a2_pallets_make_1_block(self):
         """4 pallets of 115×115×120 → 1 block (4 per block in 89-130 band)."""
         pallets = _make_pallets(115, 115, 120, 4)
-        blocks, recs, warnings = build_row_blocks_from_pallets(pallets, Hdoor_cm=HDOOR, require_multiples=True)
+        blocks, recs, warnings = build_row_blocks_from_pallets(pallets, W_cm=235, H_cm=269, Hdoor_cm=HDOOR, require_multiples=True)
         assert len(blocks) >= 1
         assert recs == {}
 
     def test_7_pallets_trigger_multiples(self):
         """7 A2 pallets (115×115×120) — 7 mod 8 ≠ 0 → recommendations, no blocks."""
         pallets = _make_pallets(115, 115, 120, 7)
-        blocks, recs, warnings = build_row_blocks_from_pallets(pallets, Hdoor_cm=HDOOR, require_multiples=True)
+        blocks, recs, warnings = build_row_blocks_from_pallets(pallets, W_cm=235, H_cm=269, Hdoor_cm=HDOOR, require_multiples=True)
         assert blocks == []
         assert len(recs) > 0
         # Must say to add 1 more pallet
@@ -114,7 +114,7 @@ class TestBuildRowBlocks:
     def test_multiples_not_required_keeps_partial(self):
         """require_multiples=False → partial chunks are dropped but no early exit."""
         pallets = _make_pallets(115, 115, 120, 7)
-        blocks, recs, warnings = build_row_blocks_from_pallets(pallets, Hdoor_cm=HDOOR, require_multiples=False)
+        blocks, recs, warnings = build_row_blocks_from_pallets(pallets, W_cm=235, H_cm=269, Hdoor_cm=HDOOR, require_multiples=False)
         # recs still populated but blocks are built from complete chunks only
         # 7 pallets → 1 complete block of 4, 3 left over (ignored)
         # Depends on block_type: 89-130 has pallets_per_block=4 → 1 block from 4, 3 leftover
@@ -123,14 +123,14 @@ class TestBuildRowBlocks:
     def test_unknown_footprint_produces_warning(self):
         """100×100 pallets are not in the block type table → warning, no block."""
         pallets = _make_pallets(100, 100, 80, 8)
-        blocks, recs, warnings = build_row_blocks_from_pallets(pallets, Hdoor_cm=HDOOR, require_multiples=True)
+        blocks, recs, warnings = build_row_blocks_from_pallets(pallets, W_cm=235, H_cm=269, Hdoor_cm=HDOOR, require_multiples=True)
         assert len(warnings) > 0
         assert any("footprint" in w.lower() or "100" in w for w in warnings)
 
     def test_c2_pallets_produce_blocks(self):
         """4 pallets of 115×77×120 → band 89-130, 4 per block → 1 block."""
         pallets = _make_pallets(115, 77, 120, 4)
-        blocks, recs, warnings = build_row_blocks_from_pallets(pallets, Hdoor_cm=HDOOR, require_multiples=True)
+        blocks, recs, warnings = build_row_blocks_from_pallets(pallets, W_cm=235, H_cm=269, Hdoor_cm=HDOOR, require_multiples=True)
         assert len(blocks) >= 1
         assert recs == {}
 
@@ -141,14 +141,14 @@ class TestBuildRowBlocks:
         # 77×77 pallets below 89cm are therefore silently skipped — a known limitation.
         # This test uses height=100cm (band '89-130') which matches correctly.
         pallets = _make_pallets(77, 77, 100, 6)
-        blocks, recs, warnings = build_row_blocks_from_pallets(pallets, Hdoor_cm=HDOOR, require_multiples=True)
+        blocks, recs, warnings = build_row_blocks_from_pallets(pallets, W_cm=235, H_cm=269, Hdoor_cm=HDOOR, require_multiples=True)
         assert len(blocks) >= 1
         assert recs == {}
 
     def test_77x77_short_pallets_known_limitation(self):
         """77×77 pallets below 89cm are skipped (known limitation in block type table)."""
         pallets = _make_pallets(77, 77, 80, 9)
-        blocks, recs, warnings = build_row_blocks_from_pallets(pallets, Hdoor_cm=HDOOR, require_multiples=True)
+        blocks, recs, warnings = build_row_blocks_from_pallets(pallets, W_cm=235, H_cm=269, Hdoor_cm=HDOOR, require_multiples=True)
         # Known: no blocks because '77x77|66-89' key is not in the type table
         assert blocks == []
         assert len(warnings) > 0
@@ -157,14 +157,14 @@ class TestBuildRowBlocks:
         """Block height = stack_count × max_pallet_h (not the table conservative value)."""
         # 115×115×120 → band 89-130 → stack_count=2 → height=240
         pallets = _make_pallets(115, 115, 120, 8)
-        blocks, _, _ = build_row_blocks_from_pallets(pallets, Hdoor_cm=HDOOR, require_multiples=True)
+        blocks, _, _ = build_row_blocks_from_pallets(pallets, W_cm=235, H_cm=269, Hdoor_cm=HDOOR, require_multiples=True)
         heights = {b.height_cm for b in blocks}
         assert 240 in heights
 
     def test_single_block_result_n1(self):
         """Producing exactly 1 block should not crash (regression for _BoolVarImpl bug)."""
         pallets = _make_pallets(115, 115, 120, 4)
-        blocks, _, _ = build_row_blocks_from_pallets(pallets, Hdoor_cm=HDOOR, require_multiples=True)
+        blocks, _, _ = build_row_blocks_from_pallets(pallets, W_cm=235, H_cm=269, Hdoor_cm=HDOOR, require_multiples=True)
         assert len(blocks) == 1
 
     def test_no_door_valid_blocks_flagged(self):
@@ -173,7 +173,7 @@ class TestBuildRowBlocks:
         Verify that these ARE produced (no false rejection).
         """
         pallets = _make_pallets(115, 77, 135, 2)
-        blocks, recs, warnings = build_row_blocks_from_pallets(pallets, Hdoor_cm=HDOOR, require_multiples=True)
+        blocks, recs, warnings = build_row_blocks_from_pallets(pallets, W_cm=235, H_cm=269, Hdoor_cm=HDOOR, require_multiples=True)
         assert recs == {}
         assert len(blocks) >= 1
         # All blocks should be ≤ door height
@@ -182,7 +182,7 @@ class TestBuildRowBlocks:
     def test_block_type_keys_valid(self):
         """All returned block type keys should follow the 'LxW|band' format."""
         pallets = _make_pallets(115, 115, 120, 8) + _make_pallets(115, 77, 120, 4)
-        blocks, _, _ = build_row_blocks_from_pallets(pallets, Hdoor_cm=HDOOR, require_multiples=True)
+        blocks, _, _ = build_row_blocks_from_pallets(pallets, W_cm=235, H_cm=269, Hdoor_cm=HDOOR, require_multiples=True)
         for b in blocks:
             assert "|" in b.block_type_key
             parts = b.block_type_key.split("|")
@@ -191,6 +191,6 @@ class TestBuildRowBlocks:
     def test_weight_summed_correctly(self):
         """Block weight = sum of pallet weights in the chunk."""
         pallets = _make_pallets(115, 115, 120, 8)  # 8 pallets × 50 kg = 400 kg
-        blocks, _, _ = build_row_blocks_from_pallets(pallets, Hdoor_cm=HDOOR, require_multiples=True)
+        blocks, _, _ = build_row_blocks_from_pallets(pallets, W_cm=235, H_cm=269, Hdoor_cm=HDOOR, require_multiples=True)
         total_weight = sum(b.weight_kg for b in blocks)
         assert abs(total_weight - 400.0) < 0.01
