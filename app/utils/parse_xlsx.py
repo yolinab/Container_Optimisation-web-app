@@ -8,14 +8,16 @@ import re
 # Only columns actually read by the optimizer are listed here.
 # ────────────────────────────────────────────────────────────────────────────
 COLUMN_ALIASES: Dict[str, List[str]] = {
-    # Pallet / box type code: A1, A2, NP …
-    "TYPE_CODE":    ["Pallet type", "Pallet size"],
+    # Packing / type code — only the value "NP" is acted on (marks loose boxes).
+    # All other values (A1, A2, C2 …) are ignored by the optimiser.
+    "TYPE_CODE":    ["Packing", "Pallet type", "Pallet size"],
 
     # Physical dimensions string, e.g. "1.15x1.15x1.20"
-    "DIMENSIONS":   ["Pallet and packing size", "Pallet size", "size"],
+    "DIMENSIONS":   ["Dimensions outer / pallet", "Pallet and packing size", "Pallet size", "size"],
 
-    # Number of units ordered (pallets for A-rows, boxes for NP rows)
+    # Number of units ordered (pallets for pallet rows, boxes for NP rows)
     "QUANTITY": [
+        "Total outer / pallet",
         "Order External Packaging Quantity",
         "Ordered External Packaging Quantity",
         "External Packaging Quantity",
@@ -32,7 +34,7 @@ COLUMN_ALIASES: Dict[str, List[str]] = {
 
     # Optional supplementary columns
     "ITEM":         ["Item", "item"],
-    "BARCODE":      ["Barcode", "bar code", "ean"],
+    "BARCODE":      ["Barcode Item", "Barcode", "bar code", "ean"],
     "CODE":         ["Code", "article", "sku"],
     "WEIGHT":       ["External Net weight", "Net weight", "weight"],
     "PRICE_FOB":    ["Item price FOB", "price fob", "fob price", "item price", "unit price"],
@@ -491,6 +493,9 @@ def _detect_header_row(excel_path: str, sheet_name: Any = 0) -> int:
     Returns 0 (first row) as a fallback.
     """
     markers = {
+        # new column names
+        "packing", "dimensions outer / pallet", "total outer / pallet", "barcode item",
+        # legacy column names
         "barcode", "pallet type", "pallet size", "pallet and packing size",
         "productname", "product name", "total order full pallets",
         "total number of pallets", "total pallet in container",
@@ -608,8 +613,6 @@ def parse_pallet_excel_v3(
             label_parts.append(str(row[col_productname]).strip())
         if col_item and pd.notna(row[col_item]):
             label_parts.append(str(row[col_item]).strip())
-        if not label_parts and col_type_code and pd.notna(row[col_type_code]):
-            label_parts.append(str(row[col_type_code]).strip())
 
         pallet_label = " | ".join(label_parts) if label_parts else "UNKNOWN"
 
