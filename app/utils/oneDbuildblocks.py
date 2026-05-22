@@ -117,6 +117,8 @@ def build_block_type_table(W_cm: int, H_cm: int, Hdoor_cm: int) -> Dict[str, Blo
             allowed_lengths=tuple(sorted(set(lengths), reverse=True)),
         )
 
+    usable_h = H_cm - 10  # 10 cm clearance buffer between top of stack and ceiling
+
     for L, W, allow_rotate in _PALLET_FOOTPRINTS:
         # Conservative: use the larger footprint dimension as row depth,
         # so pallets_across uses the smaller clearance direction.
@@ -127,9 +129,9 @@ def build_block_type_table(W_cm: int, H_cm: int, Hdoor_cm: int) -> Dict[str, Blo
         for band_name, band_max_h in _HEIGHT_BANDS:
             if band_name == "230" and H_cm < 230:
                 continue  # container too short for near-container-height pallets
-            stack_count       = max(1, H_cm // band_max_h)
+            stack_count       = max(1, usable_h // band_max_h)
             pallets_per_block = pallets_across * stack_count
-            block_height_cm   = stack_count * band_max_h
+            block_height_cm   = stack_count * band_max_h  # actual pallet height, no buffer added
             add((L, W), band_name, pallets_per_block, stack_count, block_height_cm, allow_rotate)
 
     return table
@@ -171,23 +173,21 @@ def build_row_blocks_from_pallets(
 
         buckets.setdefault(key, []).append(pm)
 
-    # 1b) Determine effective stacking per bucket.
-    # When double-stacking would exceed the door height, reduce to single-stack so
-    # the block can still pass through the door (a single 128 cm pallet fits through a
-    # 250 cm door even though two stacked at 256 cm would not).
+    # 1b) Determine effective stacking per bucket using actual pallet heights.
+    # The block-type table uses conservative band maximums (e.g. band "89-130" assumes
+    # 130 cm), which can under-count stacks for shorter pallets (e.g. 115 cm pallets
+    # in that band allow 2 stacks at 230 cm, but 230//130=1).
+    # We always recompute from actual pallet heights so both reductions AND increases
+    # relative to the band estimate are captured.
     eff_stack:  Dict[str, int] = {}
     eff_ppb:    Dict[str, int] = {}
     for key, plist in buckets.items():
         bt = type_table[key]
-        max_h = max(int(pm["height"]) for pm in plist)
-        if bt.stack_count > 1 and bt.stack_count * max_h > Hdoor_cm:
-            # Use as many layers as fit through the door (minimum 1)
-            es = max(1, Hdoor_cm // max_h)
-            eff_stack[key] = es
-            eff_ppb[key]   = max(1, bt.pallets_per_block // bt.stack_count * es)
-        else:
-            eff_stack[key] = bt.stack_count
-            eff_ppb[key]   = bt.pallets_per_block
+        max_h          = max(int(pm["height"]) for pm in plist)
+        actual_stack   = max(1, Hdoor_cm // max_h)
+        pallets_across = max(1, bt.pallets_per_block // bt.stack_count)
+        eff_stack[key] = actual_stack
+        eff_ppb[key]   = pallets_across * actual_stack
 
     # 2) compute recommendations for multiples
     recommendations: Dict[str,int] = {}
