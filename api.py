@@ -73,8 +73,8 @@ async def optimize(
     file: UploadFile = File(...),
     container_type: str = Form("40HC"),
 ):
-    if not file.filename or not file.filename.lower().endswith((".xlsx", ".xls")):
-        raise HTTPException(status_code=400, detail="Only Excel files (.xlsx, .xls) are accepted.")
+    if not file.filename or not file.filename.lower().endswith((".xlsx", ".xlsm", ".xls")):
+        raise HTTPException(status_code=400, detail="Only Excel files (.xlsx, .xlsm, .xls) are accepted.")
 
     ctype = container_type.strip().upper()
     if ctype not in CONTAINER_PRESETS:

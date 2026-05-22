@@ -197,7 +197,6 @@ def run_pipeline(
     print("Parsing Excel...")
     lengths, widths, heights, pallets_data, meta_per_pallet = parse_pallet_excel_v3(
         str(excel_path),
-        sheet_name=0,
         return_per_pallet_meta=True,
         count_col_override=count_col_override,
     )
@@ -210,7 +209,7 @@ def run_pipeline(
         )
 
     np_boxes = parse_np_boxes_excel_v3(
-        str(excel_path), sheet_name=0, count_col_override=count_col_override
+        str(excel_path), count_col_override=count_col_override
     )
 
     # ── 2) Build row-block instances ──────────────────────────────────────────

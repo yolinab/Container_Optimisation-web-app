@@ -336,7 +336,7 @@ def parse_pallet_excel_v2(
 
 def parse_np_boxes_excel_v3(
     excel_path: str,
-    sheet_name: Any = 0,
+    sheet_name: Any = None,
     count_col_override: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """
@@ -354,7 +354,10 @@ def parse_np_boxes_excel_v3(
 
     Returns [] if no NP rows found or required columns are missing.
     """
-    header_row = _detect_header_row(excel_path, sheet_name)
+    if sheet_name is None:
+        sheet_name, header_row = _detect_data_location(excel_path)
+    else:
+        header_row = _detect_header_row(excel_path, sheet_name)
     df = pd.read_excel(excel_path, sheet_name=sheet_name, header=header_row)
 
     # Type-code column: contains A1, A2, NP, etc.
@@ -467,39 +470,69 @@ def parse_np_boxes_excel_v3(
     return np_box_types
 
 
+_HEADER_MARKERS = {
+    # current column names
+    "packing", "dimensions outer / pallet", "total outer / pallet", "barcode item",
+    # legacy column names
+    "barcode", "pallet type", "pallet size", "pallet and packing size",
+    "productname", "product name", "total order full pallets",
+    "total number of pallets", "total pallet in container",
+    "order external packaging quantity", "external packaging quantity",
+}
+
+
+def _norm_cell(v) -> str:
+    s = str(v).replace('\xa0', ' ')
+    return re.sub(r' +', ' ', s).strip().lower()
+
+
+def _detect_data_location(excel_path: str) -> Tuple[Any, int]:
+    """
+    Scan every sheet in the workbook and return (sheet_name, header_row_index)
+    for whichever sheet+row contains the most recognised column-header keywords.
+    Falls back to (0, 0) if nothing matches.
+    """
+    xl = pd.ExcelFile(excel_path)
+    best_sheet: Any = 0
+    best_row: int = 0
+    best_score: int = 0
+
+    for sheet in xl.sheet_names:
+        try:
+            df_raw = pd.read_excel(xl, sheet_name=sheet, header=None, nrows=60)
+        except Exception:
+            continue
+        for i, row in df_raw.iterrows():
+            row_cells = {_norm_cell(v) for v in row.values if pd.notna(v)}
+            score = len(row_cells & _HEADER_MARKERS)
+            if score > best_score:
+                best_score = score
+                best_sheet = sheet
+                best_row = int(i)
+
+    if best_score == 0:
+        print("[parse_xlsx] WARNING: could not auto-detect data sheet/header row — defaulting to sheet 0, row 0")
+    else:
+        print(f"[parse_xlsx] auto-detected data on sheet '{best_sheet}', header row {best_row} (score={best_score})")
+
+    return best_sheet, best_row
+
+
 def _detect_header_row(excel_path: str, sheet_name: Any = 0) -> int:
     """
-    Scan the raw sheet to find the row index of the actual column headers.
-    Looks for a row containing at least 2 known header keywords.
-    Returns 0 (first row) as a fallback.
+    Scan a single sheet to find the header row index.
+    Returns 0 as fallback.
     """
-    markers = {
-        # new column names
-        "packing", "dimensions outer / pallet", "total outer / pallet", "barcode item",
-        # legacy column names
-        "barcode", "pallet type", "pallet size", "pallet and packing size",
-        "productname", "product name", "total order full pallets",
-        "total number of pallets", "total pallet in container",
-        "order external packaging quantity", "external packaging quantity",
-    }
-
-    def _norm_cell(v) -> str:
-        # Replace non-breaking spaces (\xa0) before comparing. Excel files
-        # exported from corporate systems use \xa0 instead of regular spaces,
-        # causing .strip().lower() to silently fail to match known markers.
-        s = str(v).replace('\xa0', ' ')
-        return re.sub(r' +', ' ', s).strip().lower()
-
     df_raw = pd.read_excel(excel_path, sheet_name=sheet_name, header=None)
     for i, row in df_raw.iterrows():
-        row_lower = {_norm_cell(v) for v in row.values if pd.notna(v)}
-        if len(row_lower & markers) >= 2:
+        row_cells = {_norm_cell(v) for v in row.values if pd.notna(v)}
+        if len(row_cells & _HEADER_MARKERS) >= 1:
             return int(i)
     return 0
 
 def parse_pallet_excel_v3(
     excel_path: str,
-    sheet_name: Any = 0,
+    sheet_name: Any = None,
     return_per_pallet_meta: bool = True,
     count_col_override: Optional[str] = None,
 ) -> Tuple[List[int], List[int], List[int], List[Dict[str, Any]], List[Dict[str, Any]]]:
@@ -517,7 +550,10 @@ def parse_pallet_excel_v3(
     count_col_override: if provided, use this exact column name for the order quantity
                         instead of fuzzy-matching from the candidate list.
     """
-    header_row = _detect_header_row(excel_path, sheet_name)
+    if sheet_name is None:
+        sheet_name, header_row = _detect_data_location(excel_path)
+    else:
+        header_row = _detect_header_row(excel_path, sheet_name)
     df = pd.read_excel(excel_path, sheet_name=sheet_name, header=header_row)
 
     # Required columns
