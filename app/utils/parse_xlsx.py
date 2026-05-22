@@ -92,8 +92,8 @@ def _parse_pallet_size_str(size_str: str) -> Tuple[int, int, int]:
     """
     s = str(size_str).strip().lower()
     s = s.replace("cm", "").replace(",", ".")
-    parts = re.split(r"[x×]", s)
-    parts = [p.strip() for p in parts if p.strip()]
+    # Extract all numeric tokens — ignores any text prefix like "Block "
+    parts = re.findall(r'\d+(?:\.\d+)?', s)
     if len(parts) != 3:
         raise ValueError(f"Cannot parse dimension string: '{size_str}'")
 
