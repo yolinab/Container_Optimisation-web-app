@@ -164,6 +164,12 @@ async def optimize(
         "filename":            "packing_report.xlsx",
         "container_count":     len(containers),
         "total_pallets":       sum(c.get("loaded_value", 0) for c in containers),
+        "total_boxes":         sum(
+            p.get("quantity", 0)
+            for c in containers
+            for z in c.get("box_zones", [])
+            for p in z.get("placed", [])
+        ),
         "warnings":            issue_summary["warnings"],
         "errors":              issue_summary["errors"],
         "layout_data":         layout_data,

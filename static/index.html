@@ -635,9 +635,9 @@
         <div class="field">
           <label for="containerType">Container type</label>
           <select id="containerType" name="container_type">
-            <option value="40HC" selected>40HC &mdash; 40ft High Cube (269 cm tall)</option>
-            <option value="40FT">40FT &mdash; 40ft Standard (239 cm tall)</option>
-            <option value="20FT">20FT &mdash; 20ft Standard (239 cm tall)</option>
+            <option value="40HC" selected>40HC &mdash; 40ft High Cube (1203&times;235&times;269 cm, door 259 cm)</option>
+            <option value="40FT">40FT &mdash; 40ft Standard (1203&times;235&times;239 cm, door 229 cm)</option>
+            <option value="20FT">20FT &mdash; 20ft Standard (590&times;235&times;239 cm, door 229 cm)</option>
           </select>
         </div>
 
@@ -922,7 +922,16 @@
           status.className = "status " + (hasErrors ? "error" : "success");
           status.textContent = hasErrors
             ? `Completed with ${json.errors.length} issue(s). Review below, then download the report.`
-            : `Done \u2014 ${json.container_count} container(s), ${json.total_pallets} pallets packed.`;
+            : (() => {
+                const nc = json.container_count;
+                const np = json.total_pallets || 0;
+                const nb = json.total_boxes   || 0;
+                const parts = [];
+                if (np > 0) parts.push(`${np} pallet${np !== 1 ? 's' : ''}`);
+                if (nb > 0) parts.push(`${nb} box${nb !== 1 ? 'es' : ''}`);
+                const packed = parts.length ? parts.join(', ') : 'items';
+                return `Done \u2014 ${nc} container${nc !== 1 ? 's' : ''}, ${packed} packed.`;
+              })();
 
           renderIssueList(errList,  errPanel,  json.errors);
           renderIssueList(warnList, warnPanel, json.warnings);

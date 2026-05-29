@@ -593,9 +593,12 @@ def build_pallet_boxes_from_row_blocks(container_rows, container_width_cm, gap_c
         color = palette[(block_idx - 1) % len(palette)]
 
         # Block-level legend line (one per block)
-        comps = summarize_pallets(pallets)
+        n_pallets = len(pallets)
+        high      = round(row_h / z_step) if z_step else 1
         legend_line = (
-            f"{block_idx:>2}: {block_type} | row L={row_len} H={row_h} | {comps}"
+            f"{block_idx:>2}: {n_pallets}× {Lp}×{Wp}×{z_step} cm"
+            f"  [{across} wide × {high} high]"
+            f"  row L={row_len} H={row_h} cm"
         )
 
         for i, pm in enumerate(pallets):

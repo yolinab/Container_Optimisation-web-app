@@ -176,30 +176,78 @@ def _greedy_fill_2d(
     return all_placements, floor_leftover
 
 
+_CEILING_BUFFER_CM = 9   # must match oneDbuildblocks._CEILING_BUFFER_CM
+
+
+def _parse_exact_key(key: str, W_cm: int, usable_H: int) -> Optional[Dict]:
+    """
+    Parse new-format block key  e.g. '115x77|103cm'  into its properties.
+    Returns None if the key is old-format (band-based) or unparseable.
+    """
+    try:
+        foot, h_part = key.split("|")
+        if not h_part.endswith("cm"):
+            return None           # old band-based key like '89-130'
+        L, W_fp = [int(x) for x in foot.split("x")]
+        Hraw          = int(h_part[:-2])
+        pallets_across = max(1, W_cm // L)
+        stack_count    = max(1, usable_H // Hraw)
+        ppb            = pallets_across * stack_count
+        allowed        = (L, W_fp) if L != W_fp else (L,)
+        return {
+            "L": L, "W": W_fp, "Hraw": Hraw,
+            "pallets_per_block": ppb,
+            "stack_count":       stack_count,
+            "allowed_lengths":   allowed,
+            "block_height_cm":   stack_count * Hraw,
+        }
+    except Exception:
+        return None
+
+
 def _build_pallet_candidates(
     used_keys: set,
     type_table: Dict[str, Any],
     actual_height_by_key: Dict[str, int],
+    W_cm: int = 235,
+    usable_H: int = 230,
 ) -> List[Dict[str, Any]]:
     """Build unified candidate dicts for pallet block types."""
     cands = []
     for key in used_keys:
-        bt = type_table.get(key)
-        if bt is None:
-            continue
-        actual_h = actual_height_by_key.get(key, bt.block_height_cm)
-        for L_opt in bt.allowed_lengths:
-            cands.append({
-                "type":               "pallet",
-                "key":                key,
-                "length_cm":          int(L_opt),
-                "height_cm":          actual_h,
-                "pallets_per_block":  bt.pallets_per_block,
-                "units_per_placement":bt.pallets_per_block,
-                "footprint":          list(bt.footprint),
-                "height_band":        key.split("|")[1] if "|" in key else "",
-                "stack_count":        bt.stack_count,
-            })
+        parsed = _parse_exact_key(key, W_cm, usable_H)
+        if parsed is not None:
+            actual_h = actual_height_by_key.get(key, parsed["block_height_cm"])
+            for L_opt in parsed["allowed_lengths"]:
+                cands.append({
+                    "type":               "pallet",
+                    "key":                key,
+                    "length_cm":          int(L_opt),
+                    "height_cm":          actual_h,
+                    "pallets_per_block":  parsed["pallets_per_block"],
+                    "units_per_placement":parsed["pallets_per_block"],
+                    "footprint":          [parsed["L"], parsed["W"]],
+                    "height_band":        f"{parsed['Hraw']}cm",
+                    "stack_count":        parsed["stack_count"],
+                })
+        else:
+            # Fallback: old band-based key — look up in type table
+            bt = type_table.get(key)
+            if bt is None:
+                continue
+            actual_h = actual_height_by_key.get(key, bt.block_height_cm)
+            for L_opt in bt.allowed_lengths:
+                cands.append({
+                    "type":               "pallet",
+                    "key":                key,
+                    "length_cm":          int(L_opt),
+                    "height_cm":          actual_h,
+                    "pallets_per_block":  bt.pallets_per_block,
+                    "units_per_placement":bt.pallets_per_block,
+                    "footprint":          list(bt.footprint),
+                    "height_band":        key.split("|")[1] if "|" in key else "",
+                    "stack_count":        bt.stack_count,
+                })
     return cands
 
 
@@ -462,7 +510,10 @@ def recommend_fill_containers(
             if k not in actual_height_by_key or h > actual_height_by_key[k]:
                 actual_height_by_key[k] = h
 
-        pallet_cands = _build_pallet_candidates(used_keys, type_table, actual_height_by_key)
+        pallet_cands = _build_pallet_candidates(
+            used_keys, type_table, actual_height_by_key,
+            W_cm=W, usable_H=H_container_cm - _CEILING_BUFFER_CM,
+        )
 
         # ── Account for NP boxes already placed in the tail ─────────────────
         # leftover_cm has already been reduced by box packing (see pipeline/main).

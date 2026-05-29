@@ -138,6 +138,10 @@ def build_block_type_table(W_cm: int, H_cm: int, Hdoor_cm: int) -> Dict[str, Blo
 
 
 # ---------- 4) Main function: pallets -> blocks ----------
+
+_CEILING_BUFFER_CM = 9   # clearance between top of stack and container ceiling
+
+
 def build_row_blocks_from_pallets(
     meta_per_pallet: List[Dict[str,Any]],
     W_cm: int,
@@ -151,93 +155,90 @@ def build_row_blocks_from_pallets(
       blocks: list of BlockInstance (each is a full row-block instance)
       recommendations: dict type_key -> how many pallets to add to reach next multiple
       warnings: list of strings for any rejected pallets/types
+
+    Stack count is derived from usable container height (H_cm - _CEILING_BUFFER_CM)
+    so that non-door rows can be taller than the door opening.  The solver's C9
+    constraint already limits only the last (door) row to Hdoor_cm.
+
+    Each exact pallet height gets its own bucket, so a 130 cm pallet can never
+    reduce the stack count of 103 cm pallets that share the same footprint.
     """
-    type_table = build_block_type_table(W_cm, H_cm, Hdoor_cm)
-    buckets: Dict[str, List[Dict[str,Any]]] = {}
+    usable_H = H_cm - _CEILING_BUFFER_CM
+
+    # Bucket key: (canonical_L, canonical_W, exact_pallet_height_cm)
+    buckets: Dict[Tuple[int,int,int], List[Dict[str,Any]]] = {}
     warnings: List[str] = []
 
-    # 1) assign each pallet to a block type bucket
     for pm in meta_per_pallet:
         Lraw, Wraw, Hraw = int(pm["length"]), int(pm["width"]), int(pm["height"])
         fp = canonical_footprint(Lraw, Wraw, tol=tol_cm)
         if fp is None:
-            warnings.append(f"Unknown footprint for pallet_id={pm.get('pallet_id')} dims=({Lraw},{Wraw}).")
+            warnings.append(
+                f"Unknown footprint for pallet_id={pm.get('pallet_id')} "
+                f"dims=({Lraw},{Wraw}). Skipping."
+            )
             continue
-
-        band = classify_height_band(Hraw)
-
-        key = f"{fp[0]}x{fp[1]}|{band}"
-        if key not in type_table:
-            warnings.append(f"No block type rule for pallet_id={pm.get('pallet_id')} key={key}.")
+        L, W = fp
+        if W_cm // L < 1:
+            warnings.append(
+                f"Pallet {L}×{W} cm too wide for container width {W_cm} cm. Skipping."
+            )
             continue
+        buckets.setdefault((L, W, Hraw), []).append(pm)
 
-        buckets.setdefault(key, []).append(pm)
+    def _stacks(Hraw: int) -> int:
+        return max(1, usable_H // Hraw)
 
-    # 1b) Determine effective stacking per bucket using actual pallet heights.
-    # The block-type table uses conservative band maximums (e.g. band "89-130" assumes
-    # 130 cm), which can under-count stacks for shorter pallets (e.g. 115 cm pallets
-    # in that band allow 2 stacks at 230 cm, but 230//130=1).
-    # We always recompute from actual pallet heights so both reductions AND increases
-    # relative to the band estimate are captured.
-    eff_stack:  Dict[str, int] = {}
-    eff_ppb:    Dict[str, int] = {}
-    for key, plist in buckets.items():
-        bt = type_table[key]
-        max_h          = max(int(pm["height"]) for pm in plist)
-        actual_stack   = max(1, Hdoor_cm // max_h)
-        pallets_across = max(1, bt.pallets_per_block // bt.stack_count)
-        eff_stack[key] = actual_stack
-        eff_ppb[key]   = pallets_across * actual_stack
+    def _pallets_across(L: int) -> int:
+        return max(1, W_cm // L)
 
-    # 2) compute recommendations for multiples
-    recommendations: Dict[str,int] = {}
-    for key, plist in buckets.items():
-        k = eff_ppb[key]
+    def _allowed_lengths(L: int, W: int) -> Tuple[int, ...]:
+        return (L, W) if L != W else (L,)
+
+    def _display_key(L: int, W: int, Hraw: int) -> str:
+        return f"{L}x{W}|{Hraw}cm"
+
+    # ── Multiples check ────────────────────────────────────────────────────
+    recommendations: Dict[str, int] = {}
+    for (L, W, Hraw), plist in buckets.items():
+        k   = _pallets_across(L) * _stacks(Hraw)
         rem = len(plist) % k
         if rem != 0:
-            recommendations[key] = (k - rem)
+            dk = _display_key(L, W, Hraw)
+            recommendations[dk] = recommendations.get(dk, 0) + (k - rem)
 
     if require_multiples and any(recommendations.values()):
-        # return no blocks; caller should show recommendations and stop
         return [], recommendations, warnings
 
-    # 3) build block instances by chunking
+    # ── Build block instances ──────────────────────────────────────────────
     blocks: List[BlockInstance] = []
     block_id = 1
-    for key, plist in buckets.items():
-        bt = type_table[key]
-        k  = eff_ppb[key]
-        es = eff_stack[key]
+    for (L, W, Hraw), plist in buckets.items():
+        s               = _stacks(Hraw)
+        pa              = _pallets_across(L)
+        k               = pa * s
+        block_height_cm = s * Hraw
+        dk              = _display_key(L, W, Hraw)
 
-        # chunk into groups of size k
         for start in range(0, len(plist), k):
             chunk = plist[start:start+k]
             if len(chunk) < k:
                 continue
-
-            # weight: sum actual pallet weights if present
-            w_sum = 0.0
-            for pm in chunk:
-                w_sum += float(pm.get("weight_kg") or 0.0)
-
-            for Lopt in bt.allowed_lengths:
-                max_pallet_h  = max(int(pm["height"]) for pm in chunk)
-                block_height_cm = es * max_pallet_h
-
+            w_sum = sum(float(pm.get("weight_kg") or 0.0) for pm in chunk)
+            for Lopt in _allowed_lengths(L, W):
                 blocks.append(BlockInstance(
                     block_id=block_id,
-                    block_type_key=key,
+                    block_type_key=dk,
                     length_cm=int(Lopt),
                     height_cm=int(block_height_cm),
                     weight_kg=w_sum,
                     value=int(k),
-                    pallets=chunk
+                    pallets=chunk,
                 ))
             block_id += 1
 
-
     if blocks:
-        print("[oneDbuildblocks] unique block heights:", sorted({b.height_cm for b in blocks})[:20])
-
+        print("[oneDbuildblocks] unique block heights:",
+              sorted({b.height_cm for b in blocks})[:20])
 
     return blocks, recommendations, warnings

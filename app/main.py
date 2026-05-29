@@ -107,10 +107,14 @@ def _log_assumptions(out_dir: Path) -> None:
         _log(out_dir, line)
 
 
+_BOX_CEILING_BUFFER_CM = 9   # clearance above box stacks
+
+
 def assign_boxes_to_containers(
     containers: List[Dict[str, Any]],
     np_boxes: List[Dict[str, Any]],
     W: int,
+    H: int,
     Hdoor: int,
     L: int,
     Wmax_kg: int,
@@ -122,9 +126,14 @@ def assign_boxes_to_containers(
     fills the W×H cross-section with multiple box types per column before
     advancing the length cursor — eliminating the one-section-per-type waste.
 
+    Zone height uses the usable container height (H - buffer) so that boxes
+    can be stacked to the ceiling, not just to the door opening.
+
     Modifies containers in-place.  Returns unplaced boxes.
     """
     from models.box_packing import BoxPacker
+
+    zone_H = H - _BOX_CEILING_BUFFER_CM
 
     # Pool sorted largest-volume first so big items get first pick of space.
     # Shared across containers — quantities decrease as boxes are placed.
@@ -142,7 +151,7 @@ def assign_boxes_to_containers(
         tail_L = L - int(container.get("used_length_cm", 0))
         if tail_L > 0 and any(e[1] > 0 for e in pool):
             placed, columns, vol_cm3, wt_kg, length_used = packer.pack(
-                tail_L, W, Hdoor, pool, weight_budget
+                tail_L, W, zone_H, pool, weight_budget
             )
             container["loaded_weight"] = container.get("loaded_weight", 0) + wt_kg
             if placed:
@@ -152,7 +161,7 @@ def assign_boxes_to_containers(
                     "z_base_cm":       0,
                     "length_cm":       length_used,
                     "width_cm":        W,
-                    "height_cm":       Hdoor,
+                    "height_cm":       zone_H,
                     "volume_used_cm3": vol_cm3,
                     "placed":          placed,
                     "columns":         columns,
@@ -453,6 +462,7 @@ def main(
             containers,
             np_boxes,
             W=CONTAINER_WIDTH_CM,
+            H=CONTAINER_HEIGHT_CM,
             Hdoor=Hdoor_cm,
             L=L_cm,
             Wmax_kg=Wmax_kg,
@@ -489,12 +499,13 @@ def main(
             key=lambda e: e[0]["length_cm"] * e[0]["width_cm"] * e[0]["height_cm"],
             reverse=True,
         )
+        box_zone_H = CONTAINER_HEIGHT_CM - _BOX_CEILING_BUFFER_CM
         packer = BoxPacker()
         while any(e[1] > 0 for e in overflow_pool):
             if container_idx > MAX_CONTAINERS:
                 break
             placed, columns, vol_cm3, wt_kg, length_used = packer.pack(
-                L_cm, CONTAINER_WIDTH_CM, Hdoor_cm, overflow_pool, float(Wmax_kg)
+                L_cm, CONTAINER_WIDTH_CM, box_zone_H, overflow_pool, float(Wmax_kg)
             )
             if not placed:
                 break
@@ -511,7 +522,7 @@ def main(
                     "z_base_cm":       0,
                     "length_cm":       length_used,
                     "width_cm":        CONTAINER_WIDTH_CM,
-                    "height_cm":       Hdoor_cm,
+                    "height_cm":       box_zone_H,
                     "volume_used_cm3": vol_cm3,
                     "placed":          placed,
                     "columns":         columns,
@@ -529,7 +540,7 @@ def main(
                     "tall_rows_at_rear":  False,
                     "blocks_deferred":    0,
                     "why_not_all_fit":    "NP box overflow container — no pallets",
-                    "height_note":        f"Box-only overflow container. Boxes stacked up to {Hdoor_cm} cm.",
+                    "height_note":        f"Box-only overflow container. Boxes stacked up to {box_zone_H} cm.",
                 },
             }
             containers.append(overflow_container)
