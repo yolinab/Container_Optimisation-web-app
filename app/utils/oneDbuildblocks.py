@@ -153,13 +153,10 @@ def build_row_blocks_from_pallets(
       warnings: list of strings for any rejected pallets/types
     """
     type_table = build_block_type_table(W_cm, H_cm, Hdoor_cm)
-    # bucket_key = "<footprint>|<band>|s<stack_count>" so pallets with different
-    # effective stack counts never share a bucket (fixes inconsistent stacking).
-    buckets:     Dict[str, List[Dict[str,Any]]] = {}
-    bucket_info: Dict[str, Dict] = {}   # bucket_key -> {base_key, stack_count, pallets_across, allowed_lengths}
+    buckets: Dict[str, List[Dict[str,Any]]] = {}
     warnings: List[str] = []
 
-    # 1) assign each pallet to a bucket keyed by (footprint, band, per-pallet stack count)
+    # 1) assign each pallet to a block type bucket
     for pm in meta_per_pallet:
         Lraw, Wraw, Hraw = int(pm["length"]), int(pm["width"]), int(pm["height"])
         fp = canonical_footprint(Lraw, Wraw, tol=tol_cm)
@@ -168,38 +165,37 @@ def build_row_blocks_from_pallets(
             continue
 
         band = classify_height_band(Hraw)
-        base_key = f"{fp[0]}x{fp[1]}|{band}"
-        if base_key not in type_table:
-            warnings.append(f"No block type rule for pallet_id={pm.get('pallet_id')} key={base_key}.")
+
+        key = f"{fp[0]}x{fp[1]}|{band}"
+        if key not in type_table:
+            warnings.append(f"No block type rule for pallet_id={pm.get('pallet_id')} key={key}.")
             continue
 
-        # Each pallet's own stack count — how many of THIS pallet fit under the door.
-        # Using per-pallet height means 103 cm and 130 cm pallets in the same band
-        # go into separate buckets and always get the correct stack count.
-        per_pallet_stack = max(1, Hdoor_cm // Hraw)
-        bucket_key = f"{base_key}|s{per_pallet_stack}"
+        buckets.setdefault(key, []).append(pm)
 
-        buckets.setdefault(bucket_key, []).append(pm)
-        if bucket_key not in bucket_info:
-            bt = type_table[base_key]
-            pallets_across = max(1, bt.pallets_per_block // bt.stack_count)
-            bucket_info[bucket_key] = {
-                "base_key":        base_key,
-                "stack_count":     per_pallet_stack,
-                "pallets_across":  pallets_across,
-                "allowed_lengths": bt.allowed_lengths,
-            }
+    # 1b) Determine effective stacking per bucket using actual pallet heights.
+    # The block-type table uses conservative band maximums (e.g. band "89-130" assumes
+    # 130 cm), which can under-count stacks for shorter pallets (e.g. 115 cm pallets
+    # in that band allow 2 stacks at 230 cm, but 230//130=1).
+    # We always recompute from actual pallet heights so both reductions AND increases
+    # relative to the band estimate are captured.
+    eff_stack:  Dict[str, int] = {}
+    eff_ppb:    Dict[str, int] = {}
+    for key, plist in buckets.items():
+        bt = type_table[key]
+        max_h          = max(int(pm["height"]) for pm in plist)
+        actual_stack   = max(1, Hdoor_cm // max_h)
+        pallets_across = max(1, bt.pallets_per_block // bt.stack_count)
+        eff_stack[key] = actual_stack
+        eff_ppb[key]   = pallets_across * actual_stack
 
-    # 2) compute recommendations for multiples (keyed by base_key for display)
+    # 2) compute recommendations for multiples
     recommendations: Dict[str,int] = {}
-    for bucket_key, plist in buckets.items():
-        info = bucket_info[bucket_key]
-        k    = info["pallets_across"] * info["stack_count"]
-        rem  = len(plist) % k
+    for key, plist in buckets.items():
+        k = eff_ppb[key]
+        rem = len(plist) % k
         if rem != 0:
-            base_key = info["base_key"]
-            # accumulate in case multiple sub-buckets map to the same base_key
-            recommendations[base_key] = recommendations.get(base_key, 0) + (k - rem)
+            recommendations[key] = (k - rem)
 
     if require_multiples and any(recommendations.values()):
         # return no blocks; caller should show recommendations and stop
@@ -208,27 +204,29 @@ def build_row_blocks_from_pallets(
     # 3) build block instances by chunking
     blocks: List[BlockInstance] = []
     block_id = 1
-    for bucket_key, plist in buckets.items():
-        info = bucket_info[bucket_key]
-        base_key        = info["base_key"]
-        es              = info["stack_count"]
-        pallets_across  = info["pallets_across"]
-        k               = pallets_across * es
-        allowed_lengths = info["allowed_lengths"]
+    for key, plist in buckets.items():
+        bt = type_table[key]
+        k  = eff_ppb[key]
+        es = eff_stack[key]
 
+        # chunk into groups of size k
         for start in range(0, len(plist), k):
             chunk = plist[start:start+k]
             if len(chunk) < k:
                 continue
 
-            w_sum = sum(float(pm.get("weight_kg") or 0.0) for pm in chunk)
-            max_pallet_h    = max(int(pm["height"]) for pm in chunk)
-            block_height_cm = es * max_pallet_h
+            # weight: sum actual pallet weights if present
+            w_sum = 0.0
+            for pm in chunk:
+                w_sum += float(pm.get("weight_kg") or 0.0)
 
-            for Lopt in allowed_lengths:
+            for Lopt in bt.allowed_lengths:
+                max_pallet_h  = max(int(pm["height"]) for pm in chunk)
+                block_height_cm = es * max_pallet_h
+
                 blocks.append(BlockInstance(
                     block_id=block_id,
-                    block_type_key=base_key,   # display key — no stack suffix
+                    block_type_key=key,
                     length_cm=int(Lopt),
                     height_cm=int(block_height_cm),
                     weight_kg=w_sum,

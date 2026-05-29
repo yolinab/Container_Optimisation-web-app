@@ -253,10 +253,8 @@ def main(
 
         blocks, recommendations, warnings = build_row_blocks_from_pallets(
             meta_per_pallet,
-            W_cm=CONTAINER_WIDTH_CM,
-            H_cm=CONTAINER_HEIGHT_CM,
             Hdoor_cm=Hdoor_cm,
-            require_multiples=True,
+            require_multiples=True,   # HARD requirement
         )
 
         if warnings:
