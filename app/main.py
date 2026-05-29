@@ -226,95 +226,93 @@ def main(
         count_col_override=count_col_override,
     )
 
-    if not meta_per_pallet:
-        raise RuntimeError(
-            "No pallets were parsed from the Excel file.\n"
-            "Check that the file contains rows with a valid pallet size string "
-            "(e.g. '1,15x1,15x1,27') and a non-zero order quantity."
-        )
-
-    print(f"Parsed {len(meta_per_pallet)} physical pallets")
-    print(f"Distinct pallet rows: {len(pallets_data)}")
-
     # Parse NP (loose box) rows from the same file
     np_boxes = parse_np_boxes_excel_v3(
         str(excel_p), sheet_name=sheet_name, count_col_override=count_col_override
     )
 
-    # ------------------------------------------------------------
-    # 2) Build row-block instances (and validate multiples)
-    # ------------------------------------------------------------
-    _log(out_dir, "=== STEP 2: Building Row-Blocks ===")
-
-    blocks, recommendations, warnings = build_row_blocks_from_pallets(
-        meta_per_pallet,
-        Hdoor_cm=Hdoor_cm,
-        require_multiples=True,   # HARD requirement
-    )
-
-
-
-
-
-    if warnings:
-        print("\nWARNINGS during block construction:")
-        for w in warnings:
-            print(" -", w)
-
-    if recommendations:
-        lines = []
-        for k, v in recommendations.items():
-            human = _humanize_block_key(k)
-            lines.append(f"  {human}: add {v} pallet{'s' if v != 1 else ''}")
-        detail = "\n".join(lines)
-        print("\nORDER NOT VALID — pallet counts are not exact multiples:")
-        print(detail)
-        summary_path = out_dir / "summary.txt"
-        with summary_path.open("w", encoding="utf-8") as f:
-            f.write("ORDER NOT VALID — pallet counts are not exact multiples.\n")
-            f.write("Add the following pallets to reach valid block sizes:\n\n")
-            for line in lines:
-                f.write(line.strip() + "\n")
-        _log(out_dir, f"Wrote summary: {summary_path}")
+    if not meta_per_pallet and not np_boxes:
         raise RuntimeError(
-            "Pallet counts are not exact multiples — cannot build complete blocks.\n"
-            "Add the following pallets to your order:\n" + detail
+            "No pallets or boxes were parsed from the Excel file.\n"
+            "Check that the file contains rows with a valid pallet size string "
+            "(e.g. '1,15x1,15x1,27') or NP box rows with a non-zero order quantity."
         )
 
-    print(f"Constructed {len(blocks)} row-block VARIANTS")
-    physical_blocks = len(set(b.block_id for b in blocks))
-    print(f"Corresponding to {physical_blocks} physical row-blocks")
-
-    # IMPORTANT: current model cannot enforce mutual exclusion across rotation variants.
-    # So we keep only one variant per physical block_id.
-    blocks = select_one_variant_per_block(blocks)
-    print(f"After choosing ONE variant per block_id: {len(blocks)} blocks")
-
-    if not blocks:
-        raise RuntimeError(
-            "No valid pallet blocks could be built from the input.\n"
-            "All pallets had unknown footprints or unrecognised dimensions.\n"
-            "Check pallet size strings (expected format: '1,15x0,77x1,27') "
-            "and footprint dimensions (recognised: 115×115, 115×108, 115×77, 77×77 cm)."
-        )
-
-    # Pre-solver: verify at least one block fits through the door
-    door_ok = [b for b in blocks if b.height_cm <= Hdoor_cm]
-    if not door_ok:
-        heights_str = ", ".join(str(h) for h in sorted({b.height_cm for b in blocks}))
-        raise RuntimeError(
-            f"No pallet blocks fit through the container door ({Hdoor_cm} cm).\n"
-            f"Stacked block heights in your order: {heights_str} cm.\n"
-            f"Fix: increase CONTAINER_DOOR_HEIGHT_CM in optimizer_config.json "
-            f"(standard 40ft High-Cube door = 259 cm), or check pallet heights in the Excel."
-        )
+    if meta_per_pallet:
+        print(f"Parsed {len(meta_per_pallet)} physical pallets")
+        print(f"Distinct pallet rows: {len(pallets_data)}")
+    else:
+        print("No pallets in order — box-only mode.")
 
     # ------------------------------------------------------------
-    # 3) Multi-container loop
+    # 2) Build row-block instances (skipped for box-only orders)
+    # ------------------------------------------------------------
+    blocks: list = []
+    if meta_per_pallet:
+        _log(out_dir, "=== STEP 2: Building Row-Blocks ===")
+
+        blocks, recommendations, warnings = build_row_blocks_from_pallets(
+            meta_per_pallet,
+            Hdoor_cm=Hdoor_cm,
+            require_multiples=True,   # HARD requirement
+        )
+
+        if warnings:
+            print("\nWARNINGS during block construction:")
+            for w in warnings:
+                print(" -", w)
+
+        if recommendations:
+            lines = []
+            for k, v in recommendations.items():
+                human = _humanize_block_key(k)
+                lines.append(f"  {human}: add {v} pallet{'s' if v != 1 else ''}")
+            detail = "\n".join(lines)
+            print("\nORDER NOT VALID — pallet counts are not exact multiples:")
+            print(detail)
+            summary_path = out_dir / "summary.txt"
+            with summary_path.open("w", encoding="utf-8") as f:
+                f.write("ORDER NOT VALID — pallet counts are not exact multiples.\n")
+                f.write("Add the following pallets to reach valid block sizes:\n\n")
+                for line in lines:
+                    f.write(line.strip() + "\n")
+            _log(out_dir, f"Wrote summary: {summary_path}")
+            raise RuntimeError(
+                "Pallet counts are not exact multiples — cannot build complete blocks.\n"
+                "Add the following pallets to your order:\n" + detail
+            )
+
+        print(f"Constructed {len(blocks)} row-block VARIANTS")
+        physical_blocks = len(set(b.block_id for b in blocks))
+        print(f"Corresponding to {physical_blocks} physical row-blocks")
+
+        blocks = select_one_variant_per_block(blocks)
+        print(f"After choosing ONE variant per block_id: {len(blocks)} blocks")
+
+        if not blocks:
+            raise RuntimeError(
+                "No valid pallet blocks could be built from the input.\n"
+                "All pallets had unknown footprints or unrecognised dimensions.\n"
+                "Check pallet size strings (expected format: '1,15x0,77x1,27') "
+                "and footprint dimensions (recognised: 115×115, 115×108, 115×77, 77×77 cm)."
+            )
+
+        door_ok = [b for b in blocks if b.height_cm <= Hdoor_cm]
+        if not door_ok:
+            heights_str = ", ".join(str(h) for h in sorted({b.height_cm for b in blocks}))
+            raise RuntimeError(
+                f"No pallet blocks fit through the container door ({Hdoor_cm} cm).\n"
+                f"Stacked block heights in your order: {heights_str} cm.\n"
+                f"Fix: increase CONTAINER_DOOR_HEIGHT_CM in optimizer_config.json "
+                f"(standard 40ft High-Cube door = 259 cm), or check pallet heights in the Excel."
+            )
+
+    # ------------------------------------------------------------
+    # 3) Multi-container loop (skipped for box-only orders)
     # ------------------------------------------------------------
     _log(out_dir, "=== STEP 3: Solving Containers ===")
 
-    remaining_blocks = blocks[:]  # copy
+    remaining_blocks = blocks[:]  # copy — empty for box-only orders
     containers: List[Dict[str, Any]] = []
     container_idx = 1
 
@@ -477,14 +475,72 @@ def main(
             )
         if unplaced:
             total_unplaced = sum(e["remaining_qty"] for e in unplaced)
-            print(f"  Unplaced boxes: {total_unplaced} (need additional container or space)")
+            print(f"  Unplaced boxes: {total_unplaced} — creating overflow container(s)...")
         else:
             print("  All NP boxes assigned.")
 
     # ------------------------------------------------------------
-    # 7b) Validation — sanity-check the full packing result
+    # 7b) Overflow containers for unplaced NP boxes
     # ------------------------------------------------------------
-    _log(out_dir, "=== STEP 7b: Validating Packing Result ===")
+    if unplaced:
+        from models.box_packing import BoxPacker
+        overflow_pool = sorted(
+            [[entry["box"], int(entry["remaining_qty"])] for entry in unplaced],
+            key=lambda e: e[0]["length_cm"] * e[0]["width_cm"] * e[0]["height_cm"],
+            reverse=True,
+        )
+        packer = BoxPacker()
+        while any(e[1] > 0 for e in overflow_pool):
+            if container_idx > MAX_CONTAINERS:
+                break
+            placed, columns, vol_cm3, wt_kg, length_used = packer.pack(
+                L_cm, CONTAINER_WIDTH_CM, Hdoor_cm, overflow_pool, float(Wmax_kg)
+            )
+            if not placed:
+                break
+            overflow_container = {
+                "container_index": container_idx,
+                "rows":            [],
+                "used_length_cm":  0,
+                "leftover_cm":     L_cm - length_used,
+                "loaded_value":    0,
+                "loaded_weight":   wt_kg,
+                "box_zones": [{
+                    "zone_type":       "tail",
+                    "y_start_cm":      0,
+                    "z_base_cm":       0,
+                    "length_cm":       length_used,
+                    "width_cm":        CONTAINER_WIDTH_CM,
+                    "height_cm":       Hdoor_cm,
+                    "volume_used_cm3": vol_cm3,
+                    "placed":          placed,
+                    "columns":         columns,
+                    "total_weight_kg": wt_kg,
+                }],
+                "decisions": {
+                    "rows_packed":        0,
+                    "pallets_packed":     0,
+                    "length_used_cm":     length_used,
+                    "length_capacity_cm": L_cm,
+                    "length_pct":         round(100 * length_used / L_cm),
+                    "weight_kg":          int(wt_kg),
+                    "weight_capacity_kg": Wmax_kg,
+                    "weight_pct":         round(100 * wt_kg / Wmax_kg),
+                    "tall_rows_at_rear":  False,
+                    "blocks_deferred":    0,
+                    "why_not_all_fit":    "NP box overflow container — no pallets",
+                    "height_note":        f"Box-only overflow container. Boxes stacked up to {Hdoor_cm} cm.",
+                },
+            }
+            containers.append(overflow_container)
+            print(f"  Created overflow container {container_idx} with {sum(p['quantity'] for p in placed)} boxes")
+            container_idx += 1
+        unplaced = [{"box": e[0], "remaining_qty": e[1]} for e in overflow_pool if e[1] > 0]
+
+    # ------------------------------------------------------------
+    # 7c) Validation — sanity-check the full packing result
+    # ------------------------------------------------------------
+    _log(out_dir, "=== STEP 7c: Validating Packing Result ===")
     validation_issues = validate_packing_result(
         containers=containers,
         original_blocks=blocks,
@@ -621,7 +677,7 @@ if __name__ == "__main__":
     sheet_val = args.sheet
     try:
         sheet_val = int(sheet_val)
-    except Exception:
+    except ValueError:
         pass
 
     main(

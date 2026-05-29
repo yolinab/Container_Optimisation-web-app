@@ -201,55 +201,57 @@ def run_pipeline(
         count_col_override=count_col_override,
     )
 
-    if not meta_per_pallet:
-        raise RuntimeError(
-            "No pallets were parsed from the Excel file.\n"
-            "Check that the file contains rows with a valid pallet size string "
-            "(e.g. '1,15x1,15x1,27') and a non-zero order quantity."
-        )
-
     np_boxes = parse_np_boxes_excel_v3(
         str(excel_path), count_col_override=count_col_override
     )
 
-    # ── 2) Build row-block instances ──────────────────────────────────────────
-    print("Building row-blocks...")
-    blocks, recommendations, warnings = build_row_blocks_from_pallets(
-        meta_per_pallet,
-        W_cm=W_cm,
-        H_cm=H_cm,
-        Hdoor_cm=Hdoor_cm,
-        require_multiples=True,
-    )
-
-    if recommendations:
-        lines = []
-        for k, v in recommendations.items():
-            human = _humanize_block_key(k)
-            lines.append(f"  {human}: add {v} pallet{'s' if v != 1 else ''}")
-        detail = "\n".join(lines)
+    if not meta_per_pallet and not np_boxes:
         raise RuntimeError(
-            "Pallet counts are not exact multiples — cannot build complete blocks.\n"
-            "Add the following pallets to your order:\n" + detail
+            "No pallets or boxes were parsed from the Excel file.\n"
+            "Check that the file contains rows with a valid pallet size string "
+            "(e.g. '1,15x1,15x1,27') or NP box rows with a non-zero order quantity."
         )
 
-    blocks = select_one_variant_per_block(blocks)
-
-    if not blocks:
-        raise RuntimeError(
-            "No valid pallet blocks could be built from the input.\n"
-            "Check pallet size strings and footprint dimensions."
+    # ── 2) Build row-block instances (skipped for box-only orders) ────────────
+    blocks: list = []
+    if meta_per_pallet:
+        print("Building row-blocks...")
+        blocks, recommendations, warnings = build_row_blocks_from_pallets(
+            meta_per_pallet,
+            W_cm=W_cm,
+            H_cm=H_cm,
+            Hdoor_cm=Hdoor_cm,
+            require_multiples=True,
         )
 
-    door_ok_check = [b for b in blocks if b.height_cm <= Hdoor_cm]
-    if not door_ok_check:
-        heights_str = ", ".join(str(h) for h in sorted({b.height_cm for b in blocks}))
-        raise RuntimeError(
-            f"No pallet blocks fit through the container door ({Hdoor_cm} cm).\n"
-            f"Stacked block heights in your order: {heights_str} cm."
-        )
+        if recommendations:
+            lines = []
+            for k, v in recommendations.items():
+                human = _humanize_block_key(k)
+                lines.append(f"  {human}: add {v} pallet{'s' if v != 1 else ''}")
+            detail = "\n".join(lines)
+            raise RuntimeError(
+                "Pallet counts are not exact multiples — cannot build complete blocks.\n"
+                "Add the following pallets to your order:\n" + detail
+            )
 
-    # ── 3) Multi-container greedy loop ────────────────────────────────────────
+        blocks = select_one_variant_per_block(blocks)
+
+        if not blocks:
+            raise RuntimeError(
+                "No valid pallet blocks could be built from the input.\n"
+                "Check pallet size strings and footprint dimensions."
+            )
+
+        door_ok_check = [b for b in blocks if b.height_cm <= Hdoor_cm]
+        if not door_ok_check:
+            heights_str = ", ".join(str(h) for h in sorted({b.height_cm for b in blocks}))
+            raise RuntimeError(
+                f"No pallet blocks fit through the container door ({Hdoor_cm} cm).\n"
+                f"Stacked block heights in your order: {heights_str} cm."
+            )
+
+    # ── 3) Multi-container greedy loop (skipped for box-only orders) ──────────
     print("Solving containers...")
     remaining_blocks = blocks[:]
     containers: List[Dict[str, Any]] = []
@@ -389,7 +391,62 @@ def run_pipeline(
                 container["decisions"]["length_used_cm"] = total_used
                 container["decisions"]["length_pct"] = round(100 * total_used / L_cm)
 
-    # ── 4b) Validation ────────────────────────────────────────────────────────
+    # ── 4b) Overflow containers for unplaced NP boxes ────────────────────────
+    if unplaced:
+        from models.box_packing import BoxPacker
+        overflow_pool: List[list] = sorted(
+            [[entry["box"], int(entry["remaining_qty"])] for entry in unplaced],
+            key=lambda e: e[0]["length_cm"] * e[0]["width_cm"] * e[0]["height_cm"],
+            reverse=True,
+        )
+        packer = BoxPacker()
+        while any(e[1] > 0 for e in overflow_pool):
+            if container_idx > MAX_CONTAINERS:
+                break
+            placed, columns, vol_cm3, wt_kg, length_used = packer.pack(
+                L_cm, W_cm, Hdoor_cm, overflow_pool, float(Wmax_kg)
+            )
+            if not placed:
+                break
+            overflow_container: Dict[str, Any] = {
+                "container_index": container_idx,
+                "rows":            [],
+                "used_length_cm":  0,
+                "leftover_cm":     L_cm - length_used,
+                "loaded_value":    0,
+                "loaded_weight":   wt_kg,
+                "box_zones": [{
+                    "zone_type":       "tail",
+                    "y_start_cm":      0,
+                    "z_base_cm":       0,
+                    "length_cm":       length_used,
+                    "width_cm":        W_cm,
+                    "height_cm":       Hdoor_cm,
+                    "volume_used_cm3": vol_cm3,
+                    "placed":          placed,
+                    "columns":         columns,
+                    "total_weight_kg": wt_kg,
+                }],
+                "decisions": {
+                    "rows_packed":        0,
+                    "pallets_packed":     0,
+                    "length_used_cm":     length_used,
+                    "length_capacity_cm": L_cm,
+                    "length_pct":         round(100 * length_used / L_cm),
+                    "weight_kg":          int(wt_kg),
+                    "weight_capacity_kg": Wmax_kg,
+                    "weight_pct":         round(100 * wt_kg / Wmax_kg),
+                    "tall_rows_at_rear":  False,
+                    "blocks_deferred":    0,
+                    "why_not_all_fit":    "NP box overflow container — no pallets",
+                    "height_note":        f"Box-only overflow container. Boxes stacked up to {Hdoor_cm} cm.",
+                },
+            }
+            containers.append(overflow_container)
+            container_idx += 1
+        unplaced = [{"box": e[0], "remaining_qty": e[1]} for e in overflow_pool if e[1] > 0]
+
+    # ── 4c) Validation ────────────────────────────────────────────────────────
     print("Validating packing result...")
     validation_issues = validate_packing_result(
         containers=containers,
@@ -457,7 +514,17 @@ def run_pipeline(
     len_bottleneck = any("length" in c["decisions"]["why_not_all_fit"] for c in containers[:-1])
     wt_bottleneck  = any("weight" in c["decisions"]["why_not_all_fit"] for c in containers[:-1])
     nc             = len(containers)
-    if nc == 1:
+    if total_pallets == 0:
+        total_boxes = sum(
+            p["quantity"]
+            for c in containers
+            for z in c.get("box_zones", [])
+            for p in z.get("placed", [])
+        )
+        overall_reason = (
+            f"Box-only order: {total_boxes} boxes packed across {nc} container(s)."
+        )
+    elif nc == 1:
         overall_reason = "All pallets fit in a single container."
     else:
         parts = [f"{total_pallets} pallets required {nc} containers."]
