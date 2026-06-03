@@ -145,13 +145,16 @@ class TestBuildRowBlocks:
         assert len(blocks) >= 1
         assert recs == {}
 
-    def test_77x77_short_pallets_known_limitation(self):
-        """77×77 pallets below 89cm are skipped (known limitation in block type table)."""
+    def test_77x77_short_pallets_now_pack_correctly(self):
+        """77×77 pallets below 89cm now work — exact-height logic removed the old band-table limitation."""
+        # 259 // 80 = 3 stacks, 235 // 77 = 3 across → k = 9
         pallets = _make_pallets(77, 77, 80, 9)
         blocks, recs, warnings = build_row_blocks_from_pallets(pallets, W_cm=235, H_cm=269, Hdoor_cm=HDOOR, require_multiples=True)
-        # Known: no blocks because '77x77|66-89' key is not in the type table
-        assert blocks == []
-        assert len(warnings) > 0
+        assert recs == {}
+        assert warnings == []
+        assert len(blocks) == 1
+        assert blocks[0].height_cm == 3 * 80   # 3 stacks × 80 cm
+        assert blocks[0].pallets_across == 3
 
     def test_block_height_uses_actual_pallet_height(self):
         """Block height = stack_count × max_pallet_h (not the table conservative value)."""
