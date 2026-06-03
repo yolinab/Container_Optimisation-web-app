@@ -350,9 +350,10 @@ def run_pipeline(
                 "length_cm":   b.length_cm,
                 "height_cm":   b.height_cm,
                 "weight_kg":   b.weight_kg,
-                "pallet_count": b.value,
-                "y_start_cm":  y_cursor,
-                "pallets":     b.pallets,
+                "pallet_count":   b.value,
+                "pallets_across": b.pallets_across,
+                "y_start_cm":     y_cursor,
+                "pallets":        b.pallets,
             })
             y_cursor += b.length_cm + gap_cm
 

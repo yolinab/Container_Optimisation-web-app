@@ -583,8 +583,8 @@ def build_pallet_boxes_from_row_blocks(container_rows, container_width_cm, gap_c
         else:
             pallet_len_y, pallet_wid_x = Lp, Wp
 
-        # Across heuristic (matches your business assumption)
-        across = 3 if (Lp == 77 and Wp == 77) else 2
+        # Use stored pallets_across; fall back to width-based heuristic for old data
+        across = int(r.get("pallets_across", 0)) or (3 if Lp == 77 and Wp == 77 else 2)
 
         # Z step: use tallest pallet height in the block to avoid overlaps
         heights = [int(pm.get("height", pm.get("height_cm", 0))) for pm in pallets]

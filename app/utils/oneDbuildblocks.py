@@ -15,11 +15,12 @@ class BlockType:
 class BlockInstance:
     block_id: int
     block_type_key: str
-    length_cm: int
+    length_cm: int       # row depth in container (along Y axis)
     height_cm: int
     weight_kg: float
-    value: int
-    pallets: List[Dict[str,Any]]  # meta dicts of pallets included
+    value: int           # total pallets in this block
+    pallets: List[Dict[str,Any]]
+    pallets_across: int = 0   # pallets side-by-side along container width (X axis)
 
 
 # ---------- 1) Canonical mapping ----------
@@ -152,20 +153,55 @@ def build_row_blocks_from_pallets(
 ) -> Tuple[List[BlockInstance], Dict[str,int], List[str]]:
     """
     Returns:
-      blocks: list of BlockInstance (each is a full row-block instance)
-      recommendations: dict type_key -> how many pallets to add to reach next multiple
-      warnings: list of strings for any rejected pallets/types
+      blocks: list of BlockInstance
+      recommendations: dict display_key -> pallets to add
+      warnings: list of issue strings
 
-    Stack count is derived from usable container height (H_cm - _CEILING_BUFFER_CM)
-    so that non-door rows can be taller than the door opening.  The solver's C9
-    constraint already limits only the last (door) row to Hdoor_cm.
-
-    Each exact pallet height gets its own bucket, so a 130 cm pallet can never
-    reduce the stack count of 103 cm pallets that share the same footprint.
+    Key design decisions
+    --------------------
+    * Exact pallet heights — each (footprint, exact_height) is its own bucket so
+      a 130 cm pallet never contaminates 103 cm stacking decisions.
+    * Rotation — for rectangular footprints BOTH orientations are created with the
+      CORRECT pallets_across for each.  A 115×77 pallet oriented with 77 cm facing
+      across the 235 cm container width fits 3 across (not 2).
+    * Stack count uses Hdoor_cm (per-pallet, not per-bucket max) so the stacked
+      block always fits through the door.
+    * Multiples: with two orientations, a valid partition a*k_A + b*k_B = n is
+      found; if none exists the minimum shortfall is recommended.
     """
     usable_H = H_cm - _CEILING_BUFFER_CM
 
-    # Bucket key: (canonical_L, canonical_W, exact_pallet_height_cm)
+    def _stacks(Hraw: int) -> int:
+        """How many pallets of height Hraw stack, limited by door AND ceiling."""
+        return max(1, min(Hdoor_cm // Hraw, usable_H // Hraw))
+
+    def _pa(across_dim: int) -> int:
+        """Pallets that fit across the container width when each is across_dim cm wide."""
+        return max(1, W_cm // across_dim)
+
+    def _display_key(L: int, W: int, Hraw: int) -> str:
+        return f"{L}x{W}|{Hraw}cm"
+
+    def _find_split(n: int, k_A: int, k_B: int) -> Optional[Tuple[int, int]]:
+        """
+        Find a>=0, b>=0 maximising a such that a*k_A + b*k_B = n.
+        Returns None if no solution exists.
+        """
+        for a in range(n // k_A, -1, -1):
+            rem = n - a * k_A
+            if rem >= 0 and rem % k_B == 0:
+                return a, rem // k_B
+        return None
+
+    def _min_to_add(n: int, k_A: int, k_B: int) -> int:
+        """Minimum r >= 0 such that _find_split(n+r, k_A, k_B) is not None."""
+        g = math.gcd(k_A, k_B)
+        r = (g - n % g) % g
+        while n + r < min(k_A, k_B):
+            r += g
+        return r
+
+    # ── Bucket by (canonical_L, canonical_W, exact_height) ────────────────
     buckets: Dict[Tuple[int,int,int], List[Dict[str,Any]]] = {}
     warnings: List[str] = []
 
@@ -179,33 +215,39 @@ def build_row_blocks_from_pallets(
             )
             continue
         L, W = fp
-        if W_cm // L < 1:
+        # Accept pallet if at least one orientation fits in container width
+        if _pa(L) < 1 and _pa(W) < 1:
             warnings.append(
                 f"Pallet {L}×{W} cm too wide for container width {W_cm} cm. Skipping."
             )
             continue
         buckets.setdefault((L, W, Hraw), []).append(pm)
 
-    def _stacks(Hraw: int) -> int:
-        return max(1, usable_H // Hraw)
-
-    def _pallets_across(L: int) -> int:
-        return max(1, W_cm // L)
-
-    def _allowed_lengths(L: int, W: int) -> Tuple[int, ...]:
-        return (L, W) if L != W else (L,)
-
-    def _display_key(L: int, W: int, Hraw: int) -> str:
-        return f"{L}x{W}|{Hraw}cm"
-
     # ── Multiples check ────────────────────────────────────────────────────
     recommendations: Dict[str, int] = {}
     for (L, W, Hraw), plist in buckets.items():
-        k   = _pallets_across(L) * _stacks(Hraw)
-        rem = len(plist) % k
-        if rem != 0:
-            dk = _display_key(L, W, Hraw)
-            recommendations[dk] = recommendations.get(dk, 0) + (k - rem)
+        s  = _stacks(Hraw)
+        dk = _display_key(L, W, Hraw)
+        n  = len(plist)
+
+        if L == W:
+            # Square: single orientation
+            k = _pa(W) * s
+            if n % k != 0:
+                recommendations[dk] = recommendations.get(dk, 0) + (k - n % k)
+        else:
+            # Rectangular: A = row L-deep (W across), B = row W-deep (L across)
+            k_A = _pa(W) * s
+            k_B = _pa(L) * s
+            if k_A == k_B:
+                k = k_A
+                if n % k != 0:
+                    recommendations[dk] = recommendations.get(dk, 0) + (k - n % k)
+            else:
+                if _find_split(n, k_A, k_B) is None:
+                    recommendations[dk] = (
+                        recommendations.get(dk, 0) + _min_to_add(n, k_A, k_B)
+                    )
 
     if require_multiples and any(recommendations.values()):
         return [], recommendations, warnings
@@ -213,29 +255,63 @@ def build_row_blocks_from_pallets(
     # ── Build block instances ──────────────────────────────────────────────
     blocks: List[BlockInstance] = []
     block_id = 1
-    for (L, W, Hraw), plist in buckets.items():
-        s               = _stacks(Hraw)
-        pa              = _pallets_across(L)
-        k               = pa * s
-        block_height_cm = s * Hraw
-        dk              = _display_key(L, W, Hraw)
 
-        for start in range(0, len(plist), k):
-            chunk = plist[start:start+k]
-            if len(chunk) < k:
-                continue
+    for (L, W, Hraw), plist in buckets.items():
+        s       = _stacks(Hraw)
+        block_h = s * Hraw
+        dk      = _display_key(L, W, Hraw)
+
+        def _make_block(chunk, row_depth, pa):
+            nonlocal block_id
             w_sum = sum(float(pm.get("weight_kg") or 0.0) for pm in chunk)
-            for Lopt in _allowed_lengths(L, W):
-                blocks.append(BlockInstance(
-                    block_id=block_id,
-                    block_type_key=dk,
-                    length_cm=int(Lopt),
-                    height_cm=int(block_height_cm),
-                    weight_kg=w_sum,
-                    value=int(k),
-                    pallets=chunk,
-                ))
+            blocks.append(BlockInstance(
+                block_id=block_id,
+                block_type_key=dk,
+                length_cm=int(row_depth),
+                height_cm=int(block_h),
+                weight_kg=w_sum,
+                value=int(len(chunk)),
+                pallets=chunk,
+                pallets_across=int(pa),
+            ))
             block_id += 1
+
+        if L == W:
+            # Square footprint: one orientation
+            pa = _pa(W)
+            k  = pa * s
+            for start in range(0, len(plist), k):
+                chunk = plist[start:start+k]
+                if len(chunk) < k:
+                    continue
+                _make_block(chunk, L, pa)
+        else:
+            k_A = _pa(W) * s   # orientation A: row_depth=L, across_dim=W
+            k_B = _pa(L) * s   # orientation B: row_depth=W, across_dim=L
+
+            if k_A == k_B:
+                # Same block size — alternate orientations to give solver both depths
+                k   = k_A
+                pa_A = _pa(W)
+                pa_B = _pa(L)
+                for i, start in enumerate(range(0, len(plist) // k * k, k)):
+                    chunk = plist[start:start+k]
+                    if i % 2 == 0:
+                        _make_block(chunk, L, pa_A)
+                    else:
+                        _make_block(chunk, W, pa_B)
+            else:
+                # Different block sizes — partition via _find_split
+                pa_A = _pa(W)
+                pa_B = _pa(L)
+                a, b = _find_split(len(plist), k_A, k_B)
+                idx = 0
+                for _ in range(a):
+                    chunk = plist[idx:idx+k_A];  idx += k_A
+                    _make_block(chunk, L, pa_A)
+                for _ in range(b):
+                    chunk = plist[idx:idx+k_B];  idx += k_B
+                    _make_block(chunk, W, pa_B)
 
     if blocks:
         print("[oneDbuildblocks] unique block heights:",
