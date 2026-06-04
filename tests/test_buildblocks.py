@@ -191,36 +191,278 @@ class TestBuildRowBlocks:
             parts = b.block_type_key.split("|")
             assert "x" in parts[0]
 
-    def test_120x100_footprint(self):
-        """120×100 cm pallets are recognised, rotatable, and pack correctly."""
-        # 40HC: usable_H=260, Hdoor=259, stack=259//103=2, pa_A=235//100=2, k_A=4
-        #                                                    pa_B=235//120=1, k_B=2
-        # 8 pallets at 103 cm → _find_split(8, 4, 2) = (2, 0) → 2 blocks of 4
-        pallets = _make_pallets(120, 100, 103, 8)
-        blocks, recs, warnings = build_row_blocks_from_pallets(
-            pallets, W_cm=235, H_cm=269, Hdoor_cm=HDOOR, require_multiples=True
-        )
-        assert recs == {}, f"unexpected recommendations: {recs}"
-        assert warnings == [], f"unexpected warnings: {warnings}"
-        assert len(blocks) >= 1
-        assert all("120x100" in b.block_type_key for b in blocks)
-        assert all(b.height_cm == 2 * 103 for b in blocks)   # double-stacked
-
-        # Rotation: both row depths (120 and 100) should appear as options
-        row_depths = {b.length_cm for b in blocks}
-        assert 120 in row_depths or 100 in row_depths  # at least one orientation used
-
-    def test_120x100_snapping(self):
-        """Dimensions within ±2 cm of 120/100 snap correctly."""
-        from utils.oneDbuildblocks import canonical_footprint
-        assert canonical_footprint(119, 101) == (120, 100)
-        assert canonical_footprint(121, 99)  == (120, 100)
-        assert canonical_footprint(120, 100) == (120, 100)
-        assert canonical_footprint(100, 120) == (120, 100)  # ordering canonical
-
     def test_weight_summed_correctly(self):
         """Block weight = sum of pallet weights in the chunk."""
         pallets = _make_pallets(115, 115, 120, 8)  # 8 pallets × 50 kg = 400 kg
         blocks, _, _ = build_row_blocks_from_pallets(pallets, W_cm=235, H_cm=269, Hdoor_cm=HDOOR, require_multiples=True)
         total_weight = sum(b.weight_kg for b in blocks)
         assert abs(total_weight - 400.0) < 0.01
+
+
+# ---------------------------------------------------------------------------
+# 120×100 footprint — comprehensive tests added June 2026
+#
+# Geometry for 40HC (W=235, H=269, Hdoor=259, usable_H=260), 103cm pallets:
+#   pa_A = 235 // 100 = 2  (row depth = 120, across dim = 100)
+#   pa_B = 235 // 120 = 1  (row depth = 100, across dim = 120)
+#   s    = min(260//103, 259//103) = min(2, 2) = 2   → block height = 206 cm
+#   k_A  = 2 × 2 = 4,  k_B = 1 × 2 = 2
+#   GCD(k_A, k_B) = 2  → valid n must be even; add 1 for any odd n
+# ---------------------------------------------------------------------------
+
+class TestFootprint120x100:
+
+    # ── Footprint snapping ──────────────────────────────────────────────────
+
+    def test_snap_exact(self):
+        assert canonical_footprint(120, 100) == (120, 100)
+
+    def test_snap_reversed_input(self):
+        """Canonical form always has L >= W."""
+        assert canonical_footprint(100, 120) == (120, 100)
+
+    def test_snap_within_tolerance_low(self):
+        assert canonical_footprint(119, 101) == (120, 100)
+        assert canonical_footprint(118, 100) == (120, 100)   # 118 → 120 (dist 2)
+        assert canonical_footprint(120, 98)  == (120, 100)   # 98  → 100 (dist 2)
+
+    def test_snap_within_tolerance_high(self):
+        assert canonical_footprint(121, 99)  == (120, 100)
+        assert canonical_footprint(122, 100) == (120, 100)   # 122 → 120 (dist 2)
+        assert canonical_footprint(120, 102) == (120, 100)   # 102 → 100 (dist 2)
+
+    def test_snap_outside_tolerance_rejected(self):
+        """123 cm is 3 away from 120 — exceeds ±2 tolerance → None."""
+        assert canonical_footprint(123, 100) is None
+
+    def test_snap_does_not_collide_with_115(self):
+        """Dimensions that should snap to 115, not 120."""
+        fp = canonical_footprint(115, 115)
+        assert fp == (115, 115)   # 115 is closer to 115 than to 120
+
+    def test_snap_does_not_collide_with_108(self):
+        """107 cm → 108 (dist 1), not 100 (dist 7)."""
+        fp = canonical_footprint(107, 120)
+        assert fp is not None and fp[0] in (108, 120) and fp[1] in (108, 120)
+
+    # ── Block creation (40HC) ───────────────────────────────────────────────
+
+    def test_blocks_created_8_pallets(self):
+        """8 pallets → 2 blocks of k_A=4 each, no recommendations."""
+        pallets = _make_pallets(120, 100, 103, 8)
+        blocks, recs, warnings = build_row_blocks_from_pallets(
+            pallets, W_cm=235, H_cm=269, Hdoor_cm=259, require_multiples=True
+        )
+        assert recs == {}
+        assert warnings == []
+        assert len(blocks) == 2
+        assert all("120x100" in b.block_type_key for b in blocks)
+
+    def test_block_height_double_stack(self):
+        """103cm pallets in 40HC: s=2 → block height = 2 × 103 = 206 cm."""
+        pallets = _make_pallets(120, 100, 103, 4)
+        blocks, _, _ = build_row_blocks_from_pallets(
+            pallets, W_cm=235, H_cm=269, Hdoor_cm=259, require_multiples=True
+        )
+        assert all(b.height_cm == 206 for b in blocks)
+
+    def test_block_height_single_stack_tall_pallet(self):
+        """200cm pallet: usable_H=260 → s=1 → block height = 200 cm."""
+        pallets = _make_pallets(120, 100, 200, 2)
+        blocks, recs, _ = build_row_blocks_from_pallets(
+            pallets, W_cm=235, H_cm=269, Hdoor_cm=259, require_multiples=True
+        )
+        assert recs == {}
+        assert all(b.height_cm == 200 for b in blocks)
+
+    def test_key_format(self):
+        """Block type key follows 'LxW|Hcm' format."""
+        pallets = _make_pallets(120, 100, 103, 4)
+        blocks, _, _ = build_row_blocks_from_pallets(
+            pallets, W_cm=235, H_cm=269, Hdoor_cm=259, require_multiples=True
+        )
+        for b in blocks:
+            assert b.block_type_key == "120x100|103cm"
+
+    def test_weight_summed(self):
+        """Block weight = sum of pallet weights in the chunk (4 × 50 kg = 200 kg)."""
+        pallets = _make_pallets(120, 100, 103, 4)
+        blocks, _, _ = build_row_blocks_from_pallets(
+            pallets, W_cm=235, H_cm=269, Hdoor_cm=259, require_multiples=True
+        )
+        assert abs(sum(b.weight_kg for b in blocks) - 200.0) < 0.01
+
+    # ── Rotation ────────────────────────────────────────────────────────────
+
+    def test_orientation_A_row_depth_120(self):
+        """4 pallets → k_A=4 fits perfectly → one block, row depth = 120 cm."""
+        pallets = _make_pallets(120, 100, 103, 4)
+        blocks, _, _ = build_row_blocks_from_pallets(
+            pallets, W_cm=235, H_cm=269, Hdoor_cm=259, require_multiples=True
+        )
+        assert any(b.length_cm == 120 for b in blocks)
+
+    def test_orientation_B_row_depth_100(self):
+        """2 pallets → k_B=2 fits → one block, row depth = 100 cm."""
+        pallets = _make_pallets(120, 100, 103, 2)
+        blocks, _, _ = build_row_blocks_from_pallets(
+            pallets, W_cm=235, H_cm=269, Hdoor_cm=259, require_multiples=True
+        )
+        assert any(b.length_cm == 100 for b in blocks)
+
+    def test_both_orientations_appear_with_6_pallets(self):
+        """6 pallets → greedy: 1 A-block (4) + 1 B-block (2) → both depths present."""
+        pallets = _make_pallets(120, 100, 103, 6)
+        blocks, recs, _ = build_row_blocks_from_pallets(
+            pallets, W_cm=235, H_cm=269, Hdoor_cm=259, require_multiples=True
+        )
+        assert recs == {}
+        depths = {b.length_cm for b in blocks}
+        assert 120 in depths
+        assert 100 in depths
+
+    def test_pallets_across_orientation_A(self):
+        """Orientation A (row=120, across=100): pa = 235 // 100 = 2."""
+        pallets = _make_pallets(120, 100, 103, 4)
+        blocks, _, _ = build_row_blocks_from_pallets(
+            pallets, W_cm=235, H_cm=269, Hdoor_cm=259, require_multiples=True
+        )
+        a_blocks = [b for b in blocks if b.length_cm == 120]
+        assert a_blocks
+        assert all(b.pallets_across == 2 for b in a_blocks)
+
+    def test_pallets_across_orientation_B(self):
+        """Orientation B (row=100, across=120): pa = 235 // 120 = 1."""
+        pallets = _make_pallets(120, 100, 103, 6)
+        blocks, _, _ = build_row_blocks_from_pallets(
+            pallets, W_cm=235, H_cm=269, Hdoor_cm=259, require_multiples=True
+        )
+        b_blocks = [b for b in blocks if b.length_cm == 100]
+        assert b_blocks
+        assert all(b.pallets_across == 1 for b in b_blocks)
+
+    # ── Multiples ───────────────────────────────────────────────────────────
+
+    def test_multiples_2_ok(self):
+        """2 pallets → k_B=2 → valid, no recommendation."""
+        _, recs, _ = build_row_blocks_from_pallets(
+            _make_pallets(120, 100, 103, 2), 235, 269, 259
+        )
+        assert recs == {}
+
+    def test_multiples_4_ok(self):
+        """4 pallets → k_A=4 → valid."""
+        _, recs, _ = build_row_blocks_from_pallets(
+            _make_pallets(120, 100, 103, 4), 235, 269, 259
+        )
+        assert recs == {}
+
+    def test_multiples_6_ok(self):
+        """6 = k_A + k_B → valid."""
+        _, recs, _ = build_row_blocks_from_pallets(
+            _make_pallets(120, 100, 103, 6), 235, 269, 259
+        )
+        assert recs == {}
+
+    def test_multiples_8_ok(self):
+        """8 = 2 × k_A → valid."""
+        _, recs, _ = build_row_blocks_from_pallets(
+            _make_pallets(120, 100, 103, 8), 235, 269, 259
+        )
+        assert recs == {}
+
+    def test_multiples_3_fails_add_1(self):
+        """3 pallets: GCD(4,2)=2, 3 is odd → need +1 pallet."""
+        blocks, recs, _ = build_row_blocks_from_pallets(
+            _make_pallets(120, 100, 103, 3), 235, 269, 259
+        )
+        assert blocks == []
+        assert recs.get("120x100|103cm") == 1
+
+    def test_multiples_5_fails_add_1(self):
+        """5 pallets: odd → need +1."""
+        blocks, recs, _ = build_row_blocks_from_pallets(
+            _make_pallets(120, 100, 103, 5), 235, 269, 259
+        )
+        assert blocks == []
+        assert recs.get("120x100|103cm") == 1
+
+    # ── Container types ─────────────────────────────────────────────────────
+
+    def test_stacking_40ft(self):
+        """103cm pallets in 40FT (Hdoor=230, usable_H=230): s=2 → H=206."""
+        pallets = _make_pallets(120, 100, 103, 4)
+        blocks, recs, _ = build_row_blocks_from_pallets(
+            pallets, W_cm=235, H_cm=239, Hdoor_cm=230, require_multiples=True
+        )
+        assert recs == {}
+        assert all(b.height_cm == 206 for b in blocks)
+
+    def test_stacking_20ft(self):
+        """103cm pallets in 20FT (Hdoor=230, usable_H=230): same as 40FT → H=206."""
+        pallets = _make_pallets(120, 100, 103, 4)
+        blocks, recs, _ = build_row_blocks_from_pallets(
+            pallets, W_cm=235, H_cm=239, Hdoor_cm=230, require_multiples=True
+        )
+        assert recs == {}
+        assert all(b.height_cm == 206 for b in blocks)
+
+    def test_stacking_40hc(self):
+        """103cm pallets in 40HC (Hdoor=259, usable_H=260): s=2 → H=206."""
+        pallets = _make_pallets(120, 100, 103, 4)
+        blocks, recs, _ = build_row_blocks_from_pallets(
+            pallets, W_cm=235, H_cm=269, Hdoor_cm=259, require_multiples=True
+        )
+        assert recs == {}
+        assert all(b.height_cm == 206 for b in blocks)
+
+    # ── Mixed footprints ────────────────────────────────────────────────────
+
+    def test_mixed_with_115x115_no_cross_contamination(self):
+        """120×100 and 115×115 pallets coexist; each gets its own blocks."""
+        pallets = _make_pallets(120, 100, 103, 4) + _make_pallets(115, 115, 103, 4)
+        blocks, recs, warnings = build_row_blocks_from_pallets(
+            pallets, W_cm=235, H_cm=269, Hdoor_cm=259, require_multiples=True
+        )
+        assert recs == {}
+        assert warnings == []
+        keys = {b.block_type_key for b in blocks}
+        assert any("120x100" in k for k in keys)
+        assert any("115x115" in k for k in keys)
+        # No block should contain pallets of mixed footprints
+        for b in blocks:
+            pallet_lengths = {int(p["length"]) for p in b.pallets}
+            assert len(pallet_lengths) == 1, "block mixed different footprint lengths"
+
+    def test_mixed_with_115x77(self):
+        """120×100 alongside 115×77 — both recognised, no mutual interference."""
+        pallets = _make_pallets(120, 100, 103, 4) + _make_pallets(115, 77, 103, 4)
+        blocks, recs, _ = build_row_blocks_from_pallets(
+            pallets, W_cm=235, H_cm=269, Hdoor_cm=259, require_multiples=True
+        )
+        assert recs == {}
+        keys = {b.block_type_key for b in blocks}
+        assert any("120x100" in k for k in keys)
+        assert any("115x77" in k for k in keys)
+
+    # ── Existing footprints unaffected ──────────────────────────────────────
+
+    def test_existing_115x115_unchanged(self):
+        """Adding 120×100 must not change 115×115 block count or height."""
+        pallets = _make_pallets(115, 115, 103, 4)
+        blocks, recs, _ = build_row_blocks_from_pallets(
+            pallets, W_cm=235, H_cm=269, Hdoor_cm=259, require_multiples=True
+        )
+        assert recs == {}
+        assert all("115x115" in b.block_type_key for b in blocks)
+        assert all(b.height_cm == 206 for b in blocks)
+
+    def test_existing_77x77_unchanged(self):
+        """77×77 pallets still produce 3-across × 2-high = k=6 blocks."""
+        pallets = _make_pallets(77, 77, 103, 6)
+        blocks, recs, _ = build_row_blocks_from_pallets(
+            pallets, W_cm=235, H_cm=269, Hdoor_cm=259, require_multiples=True
+        )
+        assert recs == {}
+        assert all(b.pallets_across == 3 for b in blocks)
+        assert all(b.height_cm == 206 for b in blocks)
