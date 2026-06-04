@@ -73,7 +73,7 @@ class TestCanonicalFootprint:
         assert canonical_footprint(113, 115) == (115, 115)
 
     def test_unknown_footprint(self):
-        assert canonical_footprint(100, 100) is None
+        assert canonical_footprint(200, 200) is None
 
     def test_ordering_canonical(self):
         # Larger dimension always first
@@ -121,8 +121,8 @@ class TestBuildRowBlocks:
         assert recs  # still has recommendations about the partial 3
 
     def test_unknown_footprint_produces_warning(self):
-        """100×100 pallets are not in the block type table → warning, no block."""
-        pallets = _make_pallets(100, 100, 80, 8)
+        """200×200 pallets are not a recognised footprint → warning, no block."""
+        pallets = _make_pallets(200, 200, 80, 8)
         blocks, recs, warnings = build_row_blocks_from_pallets(pallets, W_cm=235, H_cm=269, Hdoor_cm=HDOOR, require_multiples=True)
         assert len(warnings) > 0
         assert any("footprint" in w.lower() or "100" in w for w in warnings)
@@ -190,6 +190,33 @@ class TestBuildRowBlocks:
             assert "|" in b.block_type_key
             parts = b.block_type_key.split("|")
             assert "x" in parts[0]
+
+    def test_120x100_footprint(self):
+        """120×100 cm pallets are recognised, rotatable, and pack correctly."""
+        # 40HC: usable_H=260, Hdoor=259, stack=259//103=2, pa_A=235//100=2, k_A=4
+        #                                                    pa_B=235//120=1, k_B=2
+        # 8 pallets at 103 cm → _find_split(8, 4, 2) = (2, 0) → 2 blocks of 4
+        pallets = _make_pallets(120, 100, 103, 8)
+        blocks, recs, warnings = build_row_blocks_from_pallets(
+            pallets, W_cm=235, H_cm=269, Hdoor_cm=HDOOR, require_multiples=True
+        )
+        assert recs == {}, f"unexpected recommendations: {recs}"
+        assert warnings == [], f"unexpected warnings: {warnings}"
+        assert len(blocks) >= 1
+        assert all("120x100" in b.block_type_key for b in blocks)
+        assert all(b.height_cm == 2 * 103 for b in blocks)   # double-stacked
+
+        # Rotation: both row depths (120 and 100) should appear as options
+        row_depths = {b.length_cm for b in blocks}
+        assert 120 in row_depths or 100 in row_depths  # at least one orientation used
+
+    def test_120x100_snapping(self):
+        """Dimensions within ±2 cm of 120/100 snap correctly."""
+        from utils.oneDbuildblocks import canonical_footprint
+        assert canonical_footprint(119, 101) == (120, 100)
+        assert canonical_footprint(121, 99)  == (120, 100)
+        assert canonical_footprint(120, 100) == (120, 100)
+        assert canonical_footprint(100, 120) == (120, 100)  # ordering canonical
 
     def test_weight_summed_correctly(self):
         """Block weight = sum of pallet weights in the chunk."""

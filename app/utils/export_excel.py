@@ -35,6 +35,7 @@ _WHITE        = "FFFFFF"
 _LIGHT_GRAY   = "F5F5F5"
 
 _BLOCK_PAL: Dict[str, str] = {
+    "120x100": "F9E4B7",   # warm amber
     "115x115": "AED6F1",   # sky blue
     "115x108": "FAD7A0",   # peach
     "115x77":  "A9DFBF",   # mint green
@@ -52,6 +53,7 @@ _TL_GOOD = "27AE60"
 _TL_OK   = "E67E22"
 
 _FOOTPRINT_TO_PALLET_TYPE: Dict[str, str] = {
+    "120x100": "E1",
     "115x115": "A2",
     "115x108": "A1",
     "115x77":  "C2",
@@ -486,6 +488,7 @@ def _write_layout(ws, containers, recs, config):
 
     # ── Legend ────────────────────────────────────────────────────────────
     legend_items = [
+        ("120×100 pallet", _BLOCK_PAL["120x100"]),
         ("115×115 pallet", _BLOCK_PAL["115x115"]),
         ("115×108 pallet", _BLOCK_PAL["115x108"]),
         ("115×77  pallet", _BLOCK_PAL["115x77"]),
