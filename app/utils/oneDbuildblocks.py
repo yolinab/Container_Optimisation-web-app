@@ -201,14 +201,44 @@ def build_row_blocks_from_pallets(
     # ── Greedy allocation: fill n pallets with blocks from configs ─────────
     def _allocate(n: int, configs: List[Tuple[int,int,int]]) -> Optional[List[int]]:
         """Returns per-config block counts (descending k order), or None if impossible."""
-        counts = []
+        counts: List[int] = []
         remaining = n
         for row_depth, pa, s in configs:
             k = pa * s
             c = remaining // k
             counts.append(c)
             remaining -= c * k
-        return counts if remaining == 0 else None
+        if remaining != 0:
+            return None
+
+        # If all allocated blocks are door_over (H > Hdoor_cm), convert one
+        # full-stack block into door-stack blocks so there is always at least
+        # one block that fits through the door opening.
+        has_door_ok = any(
+            cnt > 0 and s * Hraw <= Hdoor_cm
+            for (_, _, s), cnt in zip(configs, counts)
+        )
+        if not has_door_ok:
+            # Find first door_over block and a door_ok config to swap into
+            full_idx = next(
+                (i for i, ((_, _, s), c) in enumerate(zip(configs, counts))
+                 if c > 0 and s * Hraw > Hdoor_cm),
+                None,
+            )
+            door_idx = next(
+                (i for i, (_, _, s) in enumerate(configs)
+                 if s * Hraw <= Hdoor_cm),
+                None,
+            )
+            if full_idx is not None and door_idx is not None:
+                _, pa_f, s_f = configs[full_idx]
+                _, pa_d, s_d = configs[door_idx]
+                k_f, k_d = pa_f * s_f, pa_d * s_d
+                if k_f % k_d == 0:
+                    counts[full_idx] -= 1
+                    counts[door_idx] += k_f // k_d
+
+        return counts
 
     def _min_to_add_multi(n: int, configs: List[Tuple[int,int,int]]) -> int:
         """Minimum pallets to add so _allocate returns non-None."""

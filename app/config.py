@@ -24,8 +24,8 @@ import os
 # Door heights are the ISO standard opening; use CONTAINER_DOOR_HEIGHT_CM
 # env var to set a more conservative value if needed.
 CONTAINER_PRESETS = {
-    "20FT": dict(length_cm=590,  width_cm=235, height_cm=239, door_height_cm=229, max_weight_kg=18000),
-    "40FT": dict(length_cm=1203, width_cm=235, height_cm=239, door_height_cm=229, max_weight_kg=18000),
+    "20FT": dict(length_cm=590,  width_cm=235, height_cm=239, door_height_cm=230, max_weight_kg=18000),
+    "40FT": dict(length_cm=1203, width_cm=235, height_cm=239, door_height_cm=230, max_weight_kg=18000),
     "40HC": dict(length_cm=1203, width_cm=235, height_cm=269, door_height_cm=259, max_weight_kg=18000),
 }
 
