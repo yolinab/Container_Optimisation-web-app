@@ -159,45 +159,66 @@ def build_row_blocks_from_pallets(
 
     Key design decisions
     --------------------
-    * Exact pallet heights — each (footprint, exact_height) is its own bucket so
-      a 130 cm pallet never contaminates 103 cm stacking decisions.
-    * Rotation — for rectangular footprints BOTH orientations are created with the
-      CORRECT pallets_across for each.  A 115×77 pallet oriented with 77 cm facing
-      across the 235 cm container width fits 3 across (not 2).
-    * Stack count uses Hdoor_cm (per-pallet, not per-bucket max) so the stacked
-      block always fits through the door.
-    * Multiples: with two orientations, a valid partition a*k_A + b*k_B = n is
-      found; if none exists the minimum shortfall is recommended.
+    * Exact pallet heights — each (footprint, exact_height) is its own bucket.
+    * Rotation — rectangular footprints generate blocks for BOTH orientations with
+      the CORRECT pallets_across per orientation.
+    * Dual stack heights — when usable container height allows more stacks than the
+      door opening, BOTH a full-ceiling block (for back rows) and a door-limited
+      block (for the last/door row) are created from the same pallet pool.
+      The solver's C9 constraint places full-stack blocks at the back automatically.
+    * Greedy allocation — pallets are assigned to the largest available block
+      configuration first, guaranteeing full coverage with no leftover.
     """
     usable_H = H_cm - _CEILING_BUFFER_CM
 
-    def _stacks(Hraw: int) -> int:
-        """How many pallets of height Hraw stack, limited by door AND ceiling."""
-        return max(1, min(Hdoor_cm // Hraw, usable_H // Hraw))
-
     def _pa(across_dim: int) -> int:
-        """Pallets that fit across the container width when each is across_dim cm wide."""
         return max(1, W_cm // across_dim)
 
     def _display_key(L: int, W: int, Hraw: int) -> str:
         return f"{L}x{W}|{Hraw}cm"
 
-    def _find_split(n: int, k_A: int, k_B: int) -> Optional[Tuple[int, int]]:
-        """
-        Find a>=0, b>=0 maximising a such that a*k_A + b*k_B = n.
-        Returns None if no solution exists.
-        """
-        for a in range(n // k_A, -1, -1):
-            rem = n - a * k_A
-            if rem >= 0 and rem % k_B == 0:
-                return a, rem // k_B
-        return None
+    # ── Build all block configurations for a (footprint, height) bucket ───
+    # A configuration is (row_depth, pallets_across, stack_count).
+    # We generate every combination of orientation × stack-height variant,
+    # deduplicating by k = pa * stacks (keep the one with more stacks for same k).
+    def _all_configs(L: int, W: int, Hraw: int) -> List[Tuple[int,int,int]]:
+        s_back = max(1, usable_H  // Hraw)   # stacks fitting within ceiling
+        s_door = max(1, Hdoor_cm  // Hraw)   # stacks fitting through door
+        stacks = [s_back] if s_back == s_door else [s_back, s_door]
 
-    def _min_to_add(n: int, k_A: int, k_B: int) -> int:
-        """Minimum r >= 0 such that _find_split(n+r, k_A, k_B) is not None."""
-        g = math.gcd(k_A, k_B)
+        orientations = [(L, _pa(W))] if L == W else [(L, _pa(W)), (W, _pa(L))]
+
+        seen: Dict[int, Tuple[int,int,int]] = {}
+        for row_depth, pa in orientations:
+            for s in stacks:
+                k = pa * s
+                if k not in seen or s > seen[k][2]:
+                    seen[k] = (row_depth, pa, s)
+
+        # Sort descending by k so greedy allocation prefers larger blocks
+        return sorted(seen.values(), key=lambda c: -(c[1] * c[2]))
+
+    # ── Greedy allocation: fill n pallets with blocks from configs ─────────
+    def _allocate(n: int, configs: List[Tuple[int,int,int]]) -> Optional[List[int]]:
+        """Returns per-config block counts (descending k order), or None if impossible."""
+        counts = []
+        remaining = n
+        for row_depth, pa, s in configs:
+            k = pa * s
+            c = remaining // k
+            counts.append(c)
+            remaining -= c * k
+        return counts if remaining == 0 else None
+
+    def _min_to_add_multi(n: int, configs: List[Tuple[int,int,int]]) -> int:
+        """Minimum pallets to add so _allocate returns non-None."""
+        k_vals = [c[1] * c[2] for c in configs]
+        g = k_vals[0]
+        for k in k_vals[1:]:
+            g = math.gcd(g, k)
         r = (g - n % g) % g
-        while n + r < min(k_A, k_B):
+        min_k = min(k_vals)
+        while n + r < min_k:
             r += g
         return r
 
@@ -215,7 +236,6 @@ def build_row_blocks_from_pallets(
             )
             continue
         L, W = fp
-        # Accept pallet if at least one orientation fits in container width
         if _pa(L) < 1 and _pa(W) < 1:
             warnings.append(
                 f"Pallet {L}×{W} cm too wide for container width {W_cm} cm. Skipping."
@@ -226,28 +246,13 @@ def build_row_blocks_from_pallets(
     # ── Multiples check ────────────────────────────────────────────────────
     recommendations: Dict[str, int] = {}
     for (L, W, Hraw), plist in buckets.items():
-        s  = _stacks(Hraw)
+        configs = _all_configs(L, W, Hraw)
         dk = _display_key(L, W, Hraw)
         n  = len(plist)
-
-        if L == W:
-            # Square: single orientation
-            k = _pa(W) * s
-            if n % k != 0:
-                recommendations[dk] = recommendations.get(dk, 0) + (k - n % k)
-        else:
-            # Rectangular: A = row L-deep (W across), B = row W-deep (L across)
-            k_A = _pa(W) * s
-            k_B = _pa(L) * s
-            if k_A == k_B:
-                k = k_A
-                if n % k != 0:
-                    recommendations[dk] = recommendations.get(dk, 0) + (k - n % k)
-            else:
-                if _find_split(n, k_A, k_B) is None:
-                    recommendations[dk] = (
-                        recommendations.get(dk, 0) + _min_to_add(n, k_A, k_B)
-                    )
+        if _allocate(n, configs) is None:
+            recommendations[dk] = (
+                recommendations.get(dk, 0) + _min_to_add_multi(n, configs)
+            )
 
     if require_multiples and any(recommendations.values()):
         return [], recommendations, warnings
@@ -257,61 +262,30 @@ def build_row_blocks_from_pallets(
     block_id = 1
 
     for (L, W, Hraw), plist in buckets.items():
-        s       = _stacks(Hraw)
-        block_h = s * Hraw
+        configs = _all_configs(L, W, Hraw)
         dk      = _display_key(L, W, Hraw)
+        counts = _allocate(len(plist), configs)
+        if counts is None:
+            continue   # require_multiples=False: partial chunk — drop silently
 
-        def _make_block(chunk, row_depth, pa):
-            nonlocal block_id
-            w_sum = sum(float(pm.get("weight_kg") or 0.0) for pm in chunk)
-            blocks.append(BlockInstance(
-                block_id=block_id,
-                block_type_key=dk,
-                length_cm=int(row_depth),
-                height_cm=int(block_h),
-                weight_kg=w_sum,
-                value=int(len(chunk)),
-                pallets=chunk,
-                pallets_across=int(pa),
-            ))
-            block_id += 1
-
-        if L == W:
-            # Square footprint: one orientation
-            pa = _pa(W)
-            k  = pa * s
-            for start in range(0, len(plist), k):
-                chunk = plist[start:start+k]
-                if len(chunk) < k:
-                    continue
-                _make_block(chunk, L, pa)
-        else:
-            k_A = _pa(W) * s   # orientation A: row_depth=L, across_dim=W
-            k_B = _pa(L) * s   # orientation B: row_depth=W, across_dim=L
-
-            if k_A == k_B:
-                # Same block size — alternate orientations to give solver both depths
-                k   = k_A
-                pa_A = _pa(W)
-                pa_B = _pa(L)
-                for i, start in enumerate(range(0, len(plist) // k * k, k)):
-                    chunk = plist[start:start+k]
-                    if i % 2 == 0:
-                        _make_block(chunk, L, pa_A)
-                    else:
-                        _make_block(chunk, W, pa_B)
-            else:
-                # Different block sizes — partition via _find_split
-                pa_A = _pa(W)
-                pa_B = _pa(L)
-                a, b = _find_split(len(plist), k_A, k_B)
-                idx = 0
-                for _ in range(a):
-                    chunk = plist[idx:idx+k_A];  idx += k_A
-                    _make_block(chunk, L, pa_A)
-                for _ in range(b):
-                    chunk = plist[idx:idx+k_B];  idx += k_B
-                    _make_block(chunk, W, pa_B)
+        idx = 0
+        for (row_depth, pa, s), n_blocks in zip(configs, counts):
+            k       = pa * s
+            block_h = s * Hraw
+            for _ in range(n_blocks):
+                chunk = plist[idx:idx+k];  idx += k
+                w_sum = sum(float(pm.get("weight_kg") or 0.0) for pm in chunk)
+                blocks.append(BlockInstance(
+                    block_id=block_id,
+                    block_type_key=dk,
+                    length_cm=int(row_depth),
+                    height_cm=int(block_h),
+                    weight_kg=w_sum,
+                    value=int(k),
+                    pallets=chunk,
+                    pallets_across=int(pa),
+                ))
+                block_id += 1
 
     if blocks:
         print("[oneDbuildblocks] unique block heights:",
