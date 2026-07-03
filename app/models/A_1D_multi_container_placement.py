@@ -13,6 +13,8 @@ Public interface is identical to the previous version:
   model.loadedWeight.value()
 """
 
+from typing import List
+
 from ortools.sat.python import cp_model
 
 from config import (
@@ -195,6 +197,65 @@ class RowBlock1DOrderModel:
         BIG = 10 ** 6
         m.Maximize(BIG * loaded_val + used_len)
 
+        # ── Solution hint ────────────────────────────────────────────
+        # Seed the search with a cheap greedy packing so CP-SAT always has a
+        # feasible incumbent immediately, regardless of the time limit or how
+        # long full search takes on large candidate pools. Without this, a
+        # large N (many block instances) can make the solver return UNKNOWN
+        # (time limit reached with no solution found yet) even though a valid
+        # packing obviously exists — which the caller then misreports as
+        # "no feasible solution".
+        #
+        # Greedy uses only door-compliant blocks (h <= Hdoor), taken
+        # tallest-first, so the non-increasing-height (C8) and door-height
+        # (C9) constraints are trivially satisfied by construction — no need
+        # to reason about them here.
+        #
+        # Every derived variable (element lookups, aux_slots, running
+        # totals) is hinted too, not just slot/used — otherwise CP-SAT has
+        # to re-derive the rest of the solution via full constraint
+        # propagation (including the AllDifferent/AddElement constraints
+        # over an N-sized domain) before it can accept the hint, which on
+        # large N can itself blow the time budget.
+        greedy_order = sorted(range(1, N + 1), key=lambda i: -self.h_in[i - 1])
+        hint_choice: List[int] = []
+        len_used = 0
+        wt_used  = 0
+        for i in greedy_order:
+            if len(hint_choice) >= R:
+                break
+            if self.h_in[i - 1] > self.Hdoor:
+                continue
+            extra_gap = g if hint_choice else 0
+            ln = self.len_in[i - 1]
+            wt = self.w_in[i - 1]
+            if len_used + extra_gap + ln > self.L:
+                continue
+            if wt_used + wt > self.Wmax:
+                continue
+            hint_choice.append(i)
+            len_used += extra_gap + ln
+            wt_used  += wt
+
+        for r in range(R):
+            val    = hint_choice[r] if r < len(hint_choice) else 0
+            is_used = 1 if val else 0
+            m.AddHint(slot[r], val)
+            m.AddHint(used[r], is_used)
+            m.AddHint(len_slot[r], self.len0[val])
+            m.AddHint(h_slot[r],   self.h0[val])
+            m.AddHint(w_slot[r],   self.w0[val])
+            m.AddHint(val_slot[r], self.val0[val])
+            m.AddHint(aux_slots[r], val if is_used else N + 1 + r)
+
+        rows_used_hint = len(hint_choice)
+        m.AddHint(rows_used, rows_used_hint)
+        m.AddHint(gap_count, max(0, rows_used_hint - 1))
+        m.AddHint(used_len,  len_used)
+        m.AddHint(loaded_wt, wt_used)
+        m.AddHint(loaded_val, sum(self.val_in[i - 1] for i in hint_choice))
+        m.AddHint(any_used, 1 if rows_used_hint > 0 else 0)
+
     # ------------------------------------------------------------------
     def solve(self, solver='ortools', time_limit=None):
         if time_limit is not None:
@@ -207,7 +268,17 @@ class RowBlock1DOrderModel:
             status = self._cp_solver.Solve(self._cp_model)
         else:
             status = self._cp_solver.solve(self._cp_model)
+        self.status = status
         return status in (cp_model.OPTIMAL, cp_model.FEASIBLE)
+
+    @property
+    def timed_out(self) -> bool:
+        """
+        True if the solver hit the time limit without finding *any* feasible
+        solution (status UNKNOWN) — as opposed to a proven INFEASIBLE model.
+        Only meaningful after solve() has been called.
+        """
+        return getattr(self, 'status', None) == cp_model.UNKNOWN
 
     # ------------------------------------------------------------------
     # Pipeline-compatible interface (mirrors old cpmpy-based class)

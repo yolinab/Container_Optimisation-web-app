@@ -325,6 +325,13 @@ def run_pipeline(
 
         model, solved = _solve_candidate(blocks_for_solver)
         if not solved:
+            if getattr(model, "timed_out", False):
+                raise RuntimeError(
+                    f"Solver ran out of time for container {container_idx} "
+                    f"({time_limit}s limit, {len(blocks_for_solver)} candidate blocks) "
+                    f"without finishing its search. This does not mean no packing "
+                    f"exists — increase SOLVER_TIME_LIMIT_SEC and try again."
+                )
             raise RuntimeError(
                 f"No feasible solution for container {container_idx}. "
                 f"Block heights: {sorted({b.height_cm for b in blocks_for_solver})} cm, "

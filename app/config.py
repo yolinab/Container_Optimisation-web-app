@@ -11,7 +11,7 @@ individually overridden with env vars if needed.
   CONTAINER_DOOR_HEIGHT_CM  override preset door opening height
   CONTAINER_MAX_WEIGHT_KG   override preset max payload weight
   ROW_GAP_CM                gap between pallet row-blocks (default: 5)
-  SOLVER_TIME_LIMIT_SEC     CP-SAT time limit per container (default: 3)
+  SOLVER_TIME_LIMIT_SEC     CP-SAT time limit per container (default: 15)
 
 On Render (or any cloud host): set these in the Environment tab.
 Locally: export them in your shell before starting.
@@ -45,7 +45,7 @@ _DEFAULTS: dict = {
     "CONTAINER_DOOR_HEIGHT_CM":      _preset["door_height_cm"],
     "CONTAINER_MAX_WEIGHT_KG":       _preset["max_weight_kg"],
     "ROW_GAP_CM":                    5,
-    "SOLVER_TIME_LIMIT_SEC":         3,
+    "SOLVER_TIME_LIMIT_SEC":         15,
     "RECOMMEND_OBJECTIVE":           "min_leftover",
     "RECOMMEND_SECONDARY_OBJECTIVE": "min_pallets",
 }
