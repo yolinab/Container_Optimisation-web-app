@@ -338,7 +338,7 @@ def parse_np_boxes_excel_v3(
     excel_path: str,
     sheet_name: Any = None,
     count_col_override: Optional[str] = None,
-) -> List[Dict[str, Any]]:
+) -> Tuple[List[Dict[str, Any]], List[str]]:
     """
     Parse NP (non-palletized / loose box) rows from the Excel.
 
@@ -348,11 +348,15 @@ def parse_np_boxes_excel_v3(
       'External Packaging Quantity', 'Total pallets in row',
       'Total pallet in container', or the regular pallet count column.
 
-    Returns list of dicts per box TYPE (not expanded per unit):
-      {label, length_cm, width_cm, height_cm, quantity,
-       weight_kg (per box or None), volume_cm3, total_volume_cm3, total_weight_kg}
+    Returns (np_box_types, warnings):
+      np_box_types: list of dicts per box TYPE (not expanded per unit):
+        {label, length_cm, width_cm, height_cm, quantity,
+         weight_kg (per box or None), volume_cm3, total_volume_cm3, total_weight_kg}
+      warnings: human-readable strings for every NP row that had a real
+                quantity but was excluded (bad/missing dimension), so those
+                boxes show up as a tracked discrepancy instead of vanishing.
 
-    Returns [] if no NP rows found or required columns are missing.
+    Returns ([], []) if no NP rows found or required columns are missing.
     """
     if sheet_name is None:
         sheet_name, header_row = _detect_data_location(excel_path)
@@ -367,10 +371,10 @@ def parse_np_boxes_excel_v3(
 
     if col_type_code is None:
         print("[NP boxes] No type-code column (e.g. 'Pallet type') found; skipping NP parsing.")
-        return []
+        return [], []
     if col_dimensions is None:
         print("[NP boxes] No dimensions column (e.g. 'Pallet and packing size') found; skipping NP parsing.")
-        return []
+        return [], []
 
     col_productname = _find_col_optional(df, COLUMN_ALIASES["PRODUCT_NAME"])
     col_item        = _find_col_optional(df, COLUMN_ALIASES["ITEM"])
@@ -396,20 +400,15 @@ def parse_np_boxes_excel_v3(
 
     if df_np.empty:
         print("[NP boxes] No NP rows found in Excel.")
-        return []
+        return [], []
 
     print(f"[NP boxes] Found {len(df_np)} NP row(s) in Excel.")
 
     np_box_types: List[Dict[str, Any]] = []
+    np_warnings: List[str] = []
 
-    for _, row in df_np.iterrows():
-        dim_val = row.get(col_dimensions)
-        if dim_val is None or pd.isna(dim_val):
-            continue
-        try:
-            L_cm, W_cm, H_cm = _parse_pallet_size_str(str(dim_val))
-        except Exception:
-            continue
+    for idx, row in df_np.iterrows():
+        excel_row = int(idx) + header_row + 2   # 1-based row number as seen in Excel
 
         # Quantity — try each candidate column in order, take first non-zero value
         qty = 0
@@ -423,7 +422,23 @@ def parse_np_boxes_excel_v3(
             if qty > 0:
                 break
         if qty <= 0:
-            print(f"[NP boxes] Skipping NP row with zero/missing quantity (dims: {L_cm}x{W_cm}x{H_cm})")
+            # Blank/zero quantity — treated as "not ordered", not an error.
+            continue
+
+        dim_val = row.get(col_dimensions)
+        if dim_val is None or pd.isna(dim_val):
+            np_warnings.append(
+                f"Row {excel_row}: NP box with quantity {qty} but no dimension "
+                f"value — {qty} box(es) skipped."
+            )
+            continue
+        try:
+            L_cm, W_cm, H_cm = _parse_pallet_size_str(str(dim_val))
+        except Exception as e:
+            np_warnings.append(
+                f"Row {excel_row}: NP box dimension '{dim_val}' could not be "
+                f"parsed ({e}) — {qty} box(es) skipped."
+            )
             continue
 
         # Weight per box (optional)
@@ -467,7 +482,7 @@ def parse_np_boxes_excel_v3(
         f"{total_qty} boxes, {total_vol/1e6:.3f} m³"
         + (f", {total_wt:.0f} kg total" if total_wt else "")
     )
-    return np_box_types
+    return np_box_types, np_warnings
 
 
 _HEADER_MARKERS = {
@@ -535,7 +550,7 @@ def parse_pallet_excel_v3(
     sheet_name: Any = None,
     return_per_pallet_meta: bool = True,
     count_col_override: Optional[str] = None,
-) -> Tuple[List[int], List[int], List[int], List[Dict[str, Any]], List[Dict[str, Any]]]:
+) -> Tuple[List[int], List[int], List[int], List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, Any]]:
     """
     New format for multi-container/subset model:
 
@@ -544,11 +559,23 @@ def parse_pallet_excel_v3(
       pallets_data: aggregated per type row
       meta_per_pallet: one dict per physical pallet, aligned with lengths/widths/heights
                       so meta_per_pallet[i] describes pallet i.
+      diagnostics: {"warnings": list of human-readable strings describing every
+                    row that was excluded and why, "raw_total_qty": the true
+                    total quantity across all pallet rows in the file (valid or
+                    not) — the ground-truth number every downstream stage's
+                    output should reconcile back to.}
 
     If return_per_pallet_meta=False, meta_per_pallet will be [].
 
     count_col_override: if provided, use this exact column name for the order quantity
                         instead of fuzzy-matching from the candidate list.
+
+    Rows are no longer dropped silently: a row with a blank/zero quantity is
+    treated as "not ordered" (no warning — this is a normal, common case in
+    order templates), but a row with a REAL quantity that fails to parse
+    (bad/missing dimension string) generates a warning AND is still counted
+    in raw_total_qty, so its pallets show up as a tracked discrepancy instead
+    of silently vanishing from the final packing report.
     """
     if sheet_name is None:
         sheet_name, header_row = _detect_data_location(excel_path)
@@ -583,10 +610,13 @@ def parse_pallet_excel_v3(
         np_mask = df[col_type_code].astype(str).str.strip().str.upper().isin(_BOX_TYPE_VALUES)
         df = df[~np_mask]
 
-    # Clean rows
-    df = df.dropna(subset=[col_pallet_size])
-    df = df.dropna(subset=[col_count])
-    df = df[df[col_count] > 0]
+    # Ground-truth total: sum of the quantity column across every row that
+    # matched the pallet-columns detection (valid or not), so downstream
+    # code can prove nothing silently vanished. Blank cells coerce to 0.
+    raw_total_qty = int(
+        pd.to_numeric(df[col_count], errors="coerce").fillna(0).sum()
+    )
+    parse_warnings: List[str] = []
 
     pallets_data: List[Dict[str, Any]] = []
     meta_per_pallet: List[Dict[str, Any]] = []
@@ -597,14 +627,35 @@ def parse_pallet_excel_v3(
 
     pallet_global_id = 1  # stable running id across expanded pallets
 
-    for _, row in df.iterrows():
-        size_str = row[col_pallet_size]
-        try:
-            L_cm, W_cm, H_cm = _parse_pallet_size_str(size_str)
-        except Exception:
+    for idx, row in df.iterrows():
+        excel_row = int(idx) + header_row + 2   # 1-based row number as seen in Excel
+
+        raw_qty = pd.to_numeric(row.get(col_count), errors="coerce")
+        qty = 0 if pd.isna(raw_qty) else int(raw_qty)
+        size_str = row.get(col_pallet_size)
+        has_size = pd.notna(size_str) and str(size_str).strip() != ""
+
+        if qty <= 0:
+            # Blank/zero quantity — treated as "not ordered", not an error.
             continue
 
-        count = int(row[col_count])
+        if not has_size:
+            parse_warnings.append(
+                f"Row {excel_row}: quantity {qty} but no dimension value — "
+                f"{qty} pallet(s) skipped."
+            )
+            continue
+
+        try:
+            L_cm, W_cm, H_cm = _parse_pallet_size_str(size_str)
+        except Exception as e:
+            parse_warnings.append(
+                f"Row {excel_row}: dimension '{size_str}' could not be parsed "
+                f"({e}) — {qty} pallet(s) skipped."
+            )
+            continue
+
+        count = qty
 
         # NEW: parse weight (best-effort)
         weight_kg: Optional[float] = None
@@ -688,4 +739,5 @@ def parse_pallet_excel_v3(
     if not return_per_pallet_meta:
         meta_per_pallet = []
 
-    return lengths, widths, heights, pallets_data, meta_per_pallet
+    diagnostics = {"warnings": parse_warnings, "raw_total_qty": raw_total_qty}
+    return lengths, widths, heights, pallets_data, meta_per_pallet, diagnostics

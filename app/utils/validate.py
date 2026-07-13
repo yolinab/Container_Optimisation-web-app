@@ -15,7 +15,7 @@ WARNING — suspicious but not necessarily fatal.  Should be reviewed.
           (Zero weights, low fill on non-last container, unplaced boxes, etc.)
 """
 
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 
 # ───────────────────────────────────────────────────────────────────────────
@@ -27,17 +27,35 @@ _LENGTH_TOL_CM        = 1      # 1 cm rounding tolerance for geometry checks
 
 
 def validate_packing_result(
-    containers:       List[Dict[str, Any]],
-    original_blocks:  list,              # BlockInstance objects post-selection
-    np_boxes:         List[Dict[str, Any]],
-    L_cm:             int,
-    Hdoor_cm:         int,
-    Wmax_kg:          int,
-    gap_cm:           int,
+    containers:            List[Dict[str, Any]],
+    original_blocks:       list,              # BlockInstance objects post-selection
+    np_boxes:              List[Dict[str, Any]],
+    L_cm:                  int,
+    Hdoor_cm:              int,
+    Wmax_kg:               int,
+    gap_cm:                int,
+    raw_input_pallets:     Optional[int] = None,
+    parse_dropped_pallets: int = 0,
+    build_dropped_pallets: int = 0,
+    row_skip_warnings:     Optional[List[str]] = None,
 ) -> List[Dict[str, Any]]:
     """
     Run all sanity checks and return a list of issue dicts.
     Does NOT raise — callers decide how to surface issues.
+
+    raw_input_pallets: ground-truth total pallet quantity read straight from
+        the order file (see parse_pallet_excel_v3's diagnostics), BEFORE any
+        parsing/footprint filtering. If provided, check 0 below proves that
+        every one of those pallets is accounted for — either packed, or
+        explicitly explained by parse_dropped_pallets / build_dropped_pallets
+        (both already-surfaced WARNINGs). Anything left over is a genuine,
+        previously-invisible discrepancy and is raised as an ERROR.
+
+    row_skip_warnings: human-readable strings (from parse_pallet_excel_v3,
+        parse_np_boxes_excel_v3, and build_row_blocks_from_pallets) explaining
+        exactly which rows were excluded and why — surfaced as WARNINGs so
+        the reconciliation total in check 0 is never just a bare, unexplained
+        number.
     """
     issues: List[Dict[str, Any]] = []
 
@@ -46,6 +64,33 @@ def validate_packing_result(
 
     def warn(code: str, msg: str) -> None:
         issues.append({"level": "WARNING", "code": code, "message": msg})
+
+    # ── -1. Rows skipped while reading the order file ─────────────────────
+    for msg in (row_skip_warnings or []):
+        warn("ROW_SKIPPED", msg)
+
+    # ── 0. End-to-end pallet count reconciliation ─────────────────────────
+    # This is the master safety net: it doesn't matter WHY pallets went
+    # missing (a bug we already know about, or one nobody's found yet) —
+    # if the numbers don't add up, say so loudly instead of silently
+    # shipping a report with fewer pallets than the customer ordered.
+    if raw_input_pallets is not None:
+        packed_pallets_all = sum(
+            row.get("pallet_count", 0)
+            for c in containers
+            for row in c.get("rows", [])
+        )
+        accounted = packed_pallets_all + parse_dropped_pallets + build_dropped_pallets
+        if accounted != raw_input_pallets:
+            error(
+                "TOTAL_PALLET_COUNT_MISMATCH",
+                f"The order file has {raw_input_pallets} pallets total, but only "
+                f"{accounted} are accounted for ({packed_pallets_all} packed, "
+                f"{parse_dropped_pallets} dropped while reading the file, "
+                f"{build_dropped_pallets} dropped while building rows). "
+                f"{raw_input_pallets - accounted} pallet(s) are unaccounted for "
+                f"by any known cause — investigate before trusting this report.",
+            )
 
     # ── 1. Block coverage ─────────────────────────────────────────────────
     # Every block that entered the solver must appear in exactly one container.

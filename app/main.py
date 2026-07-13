@@ -228,17 +228,21 @@ def main(
     # ------------------------------------------------------------
     _log(out_dir, "=== STEP 1: Parsing Excel ===")
 
-    lengths, widths, heights, pallets_data, meta_per_pallet = parse_pallet_excel_v3(
+    lengths, widths, heights, pallets_data, meta_per_pallet, pallet_diag = parse_pallet_excel_v3(
         str(excel_p),
         sheet_name=sheet_name,
         return_per_pallet_meta=True,
         count_col_override=count_col_override,
     )
+    raw_input_pallets = pallet_diag["raw_total_qty"]
+    parse_dropped_pallets = raw_input_pallets - len(meta_per_pallet)
+    all_row_warnings = list(pallet_diag["warnings"])
 
     # Parse NP (loose box) rows from the same file
-    np_boxes = parse_np_boxes_excel_v3(
+    np_boxes, np_parse_warnings = parse_np_boxes_excel_v3(
         str(excel_p), sheet_name=sheet_name, count_col_override=count_col_override
     )
+    all_row_warnings.extend(np_parse_warnings)
 
     if not meta_per_pallet and not np_boxes:
         raise RuntimeError(
@@ -257,6 +261,7 @@ def main(
     # 2) Build row-block instances (skipped for box-only orders)
     # ------------------------------------------------------------
     blocks: list = []
+    build_dropped_pallets = 0
     if meta_per_pallet:
         _log(out_dir, "=== STEP 2: Building Row-Blocks ===")
 
@@ -265,6 +270,8 @@ def main(
             Hdoor_cm=Hdoor_cm,
             require_multiples=True,   # HARD requirement
         )
+        build_dropped_pallets = len(warnings)   # 1 warning == 1 pallet, see oneDbuildblocks.py
+        all_row_warnings.extend(warnings)
 
         if warnings:
             print("\nWARNINGS during block construction:")
@@ -567,6 +574,10 @@ def main(
         Hdoor_cm=Hdoor_cm,
         Wmax_kg=Wmax_kg,
         gap_cm=gap_cm,
+        raw_input_pallets=raw_input_pallets,
+        parse_dropped_pallets=parse_dropped_pallets,
+        build_dropped_pallets=build_dropped_pallets,
+        row_skip_warnings=all_row_warnings,
     )
     has_errors = report_validation_issues(
         validation_issues,

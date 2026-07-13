@@ -358,6 +358,10 @@ def build_row_blocks_from_pallets(
         return r
 
     # ── Bucket by (canonical_L, canonical_W, exact_height) ────────────────
+    # Invariant relied on by callers doing pallet-count reconciliation:
+    # this loop is per PHYSICAL PALLET, so len(warnings) == pallets dropped
+    # at this stage. If a future warning here ever covers more than one
+    # pallet, that reconciliation breaks — keep it 1 warning per pallet.
     buckets: Dict[Tuple[int,int,int], List[Dict[str,Any]]] = {}
     warnings: List[str] = []
 

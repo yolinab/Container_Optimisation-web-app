@@ -258,6 +258,45 @@ def excel_dot_decimal(tmp_path):
 
 
 @pytest.fixture
+def excel_bad_dimension_row(tmp_path):
+    """
+    8 valid A2 pallets + 1 row with a real quantity (5) but a garbled,
+    unparseable dimension string. The 5 pallets must be tracked as an
+    explained, warned-about discrepancy — not silently vanish.
+    """
+    path = tmp_path / "bad_dimension.xlsx"
+    _write_excel(path, [
+        _a2_row(8, barcode="1001", name="Good product"),
+        {
+            "Barcode": "8888",
+            "Productname": "Garbled dims",
+            "Pallet and packing size": "not-a-dimension",
+            "Pallet size": "A2",
+            "External Packaging Quantity": 5,
+        },
+    ])
+    return str(path)
+
+
+@pytest.fixture
+def excel_blank_qty_row(tmp_path):
+    """8 valid A2 pallets + 1 row with a valid dimension but a blank quantity
+    — must be silently excluded (no order), no warning, no error."""
+    path = tmp_path / "blank_qty.xlsx"
+    _write_excel(path, [
+        _a2_row(8, barcode="1001", name="Good product"),
+        {
+            "Barcode": "7777",
+            "Productname": "Blank qty",
+            "Pallet and packing size": _dim(1.15, 1.15, 1.20),
+            "Pallet size": "A2",
+            "External Packaging Quantity": None,
+        },
+    ])
+    return str(path)
+
+
+@pytest.fixture
 def excel_blank_header_rows(tmp_path):
     """Excel with 2 blank rows before the header — tests _detect_header_row."""
     wb = openpyxl.Workbook()

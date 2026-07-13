@@ -70,33 +70,33 @@ class TestDetectHeaderRow:
 
 class TestParsePalletExcelV3:
     def test_minimal_valid_count(self, excel_minimal_valid):
-        lengths, widths, heights, pallets_data, meta = parse_pallet_excel_v3(excel_minimal_valid)
+        lengths, widths, heights, pallets_data, meta, _ = parse_pallet_excel_v3(excel_minimal_valid)
         assert len(meta) == 8                   # 8 physical pallets
         assert len(pallets_data) == 1           # 1 type row
 
     def test_minimal_valid_dimensions(self, excel_minimal_valid):
-        lengths, widths, heights, _, meta = parse_pallet_excel_v3(excel_minimal_valid)
+        lengths, widths, heights, _, meta, _ = parse_pallet_excel_v3(excel_minimal_valid)
         assert all(l == 115 for l in lengths)
         assert all(w == 115 for w in widths)
         assert all(h == 120 for h in heights)
 
     def test_np_rows_excluded(self, excel_mixed):
         """NP rows must NOT appear in pallet parse results."""
-        _, _, _, pallets_data, meta = parse_pallet_excel_v3(excel_mixed)
+        _, _, _, pallets_data, meta, _ = parse_pallet_excel_v3(excel_mixed)
         for p in meta:
             assert p["height"] != 87   # NP box height is 87 cm
 
     def test_mixed_counts(self, excel_mixed):
         """A2 (8) + C2 (4) = 12 physical pallets."""
-        _, _, _, _, meta = parse_pallet_excel_v3(excel_mixed)
+        _, _, _, _, meta, _ = parse_pallet_excel_v3(excel_mixed)
         assert len(meta) == 12
 
     def test_dot_decimal_dimensions(self, excel_dot_decimal):
-        _, _, heights, _, meta = parse_pallet_excel_v3(excel_dot_decimal)
+        _, _, heights, _, meta, _ = parse_pallet_excel_v3(excel_dot_decimal)
         assert all(h == 120 for h in heights)
 
     def test_blank_header_rows(self, excel_blank_header_rows):
-        _, _, _, _, meta = parse_pallet_excel_v3(excel_blank_header_rows)
+        _, _, _, _, meta, _ = parse_pallet_excel_v3(excel_blank_header_rows)
         assert len(meta) == 8
 
     def test_missing_required_column_raises(self, excel_wrong_col_name):
@@ -109,7 +109,7 @@ class TestParsePalletExcelV3:
 
     def test_count_col_override_success(self, excel_wrong_col_override):
         """count_col_override='MyQty' should work even though default fuzzy match fails."""
-        _, _, _, _, meta = parse_pallet_excel_v3(excel_wrong_col_override, count_col_override="MyQty")
+        _, _, _, _, meta, _ = parse_pallet_excel_v3(excel_wrong_col_override, count_col_override="MyQty")
         assert len(meta) == 8
 
     def test_count_col_override_not_in_file_raises(self, excel_minimal_valid):
@@ -119,15 +119,45 @@ class TestParsePalletExcelV3:
         assert "NonExistentColumn" in str(exc_info.value)
 
     def test_meta_has_required_keys(self, excel_minimal_valid):
-        _, _, _, _, meta = parse_pallet_excel_v3(excel_minimal_valid)
+        _, _, _, _, meta, _ = parse_pallet_excel_v3(excel_minimal_valid)
         required = {"pallet_id", "length", "width", "height"}
         for m in meta:
             assert required.issubset(m.keys())
 
     def test_np_only_returns_empty(self, excel_np_only):
         """NP-only file should return 0 pallets."""
-        _, _, _, pallets_data, meta = parse_pallet_excel_v3(excel_np_only)
+        _, _, _, pallets_data, meta, _ = parse_pallet_excel_v3(excel_np_only)
         assert len(meta) == 0
+
+    def test_raw_total_qty_matches_valid_rows(self, excel_minimal_valid):
+        """No dropped rows -> raw_total_qty equals the actual pallet count."""
+        _, _, _, _, meta, diag = parse_pallet_excel_v3(excel_minimal_valid)
+        assert diag["raw_total_qty"] == 8
+        assert diag["raw_total_qty"] == len(meta)
+        assert diag["warnings"] == []
+
+    def test_bad_dimension_row_tracked_not_silently_dropped(self, excel_bad_dimension_row):
+        """
+        A row with a real quantity but a garbled dimension string must be
+        excluded from meta_per_pallet AND explained via a warning AND still
+        counted in raw_total_qty — this is the exact bug that caused a
+        real-world 25-pallet silent gap.
+        """
+        _, _, _, _, meta, diag = parse_pallet_excel_v3(excel_bad_dimension_row)
+        assert len(meta) == 8                      # only the good row parsed
+        assert diag["raw_total_qty"] == 13          # 8 good + 5 from the bad row
+        assert len(diag["warnings"]) == 1
+        assert "5 pallet(s) skipped" in diag["warnings"][0]
+        # The gap must be fully explained: raw total - parsed = the warned-about count
+        assert diag["raw_total_qty"] - len(meta) == 5
+
+    def test_blank_quantity_row_excluded_without_warning(self, excel_blank_qty_row):
+        """A row with a blank/zero quantity is a normal 'not ordered' case —
+        must be excluded silently, with no warning and no raw_total_qty impact."""
+        _, _, _, _, meta, diag = parse_pallet_excel_v3(excel_blank_qty_row)
+        assert len(meta) == 8
+        assert diag["raw_total_qty"] == 8
+        assert diag["warnings"] == []
 
 
 # ---------------------------------------------------------------------------
@@ -136,28 +166,28 @@ class TestParsePalletExcelV3:
 
 class TestParseNpBoxesV3:
     def test_np_only_finds_boxes(self, excel_np_only):
-        boxes = parse_np_boxes_excel_v3(excel_np_only)
+        boxes, _ = parse_np_boxes_excel_v3(excel_np_only)
         assert len(boxes) == 1
         assert boxes[0]["quantity"] == 10
 
     def test_np_boxes_in_mixed(self, excel_mixed):
-        boxes = parse_np_boxes_excel_v3(excel_mixed)
+        boxes, _ = parse_np_boxes_excel_v3(excel_mixed)
         assert len(boxes) == 1
         assert boxes[0]["quantity"] == 6
 
     def test_no_np_in_pallet_only(self, excel_minimal_valid):
-        boxes = parse_np_boxes_excel_v3(excel_minimal_valid)
+        boxes, _ = parse_np_boxes_excel_v3(excel_minimal_valid)
         assert boxes == []
 
     def test_np_box_dimensions_cm(self, excel_np_only):
-        boxes = parse_np_boxes_excel_v3(excel_np_only)
+        boxes, _ = parse_np_boxes_excel_v3(excel_np_only)
         b = boxes[0]
         assert b["length_cm"] == 46
         assert b["width_cm"] == 46
         assert b["height_cm"] == 87
 
     def test_np_box_has_volume(self, excel_np_only):
-        boxes = parse_np_boxes_excel_v3(excel_np_only)
+        boxes, _ = parse_np_boxes_excel_v3(excel_np_only)
         b = boxes[0]
         assert b["volume_cm3"] == 46 * 46 * 87
         assert b["total_volume_cm3"] == b["volume_cm3"] * 10
