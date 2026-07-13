@@ -42,7 +42,7 @@ def canonical_footprint(L: int, W: int, tol: int = 2) -> Optional[Tuple[int,int]
     Returns (Lcan, Wcan) with Lcan>=Wcan convention for keys.
     """
     # Allowed sides we expect
-    allowed = [120, 115, 108, 100, 77]
+    allowed = [120, 115, 108, 105, 100, 77]
     a = normalize_dim_to_set(L, allowed, tol=tol)
     b = normalize_dim_to_set(W, allowed, tol=tol)
     if a is None or b is None:
@@ -75,6 +75,7 @@ _PALLET_FOOTPRINTS: List[Tuple[int, int, bool]] = [
     (120, 100, True),
     (115, 115, False),
     (115, 108, True),
+    (115, 105, True),
     (115,  77, True),
     ( 77,  77, False),
 ]

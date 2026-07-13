@@ -602,3 +602,43 @@ class TestMultiLayoutAllocation:
                 continue  # genuine shortfall — not what this test checks
             accounted = sum(b.value for b in blocks)
             assert accounted == n, f"n={n}: only {accounted} of {n} pallets ended up in blocks"
+
+
+# ---------------------------------------------------------------------------
+# 115x105 footprint (Kim Phat's file, July 2026): 105cm was 3cm outside the
+# +/-2cm tolerance for snapping to the nearest known width (108cm), so every
+# 114x105 pallet was silently rejected as "unknown footprint" — 25 pallets
+# vanished from a real order with no way to recover them short of reading
+# the Notices list. 105 is now its own recognised size.
+# ---------------------------------------------------------------------------
+
+class TestFootprint115x105:
+
+    def test_snap_exact(self):
+        assert canonical_footprint(115, 105) == (115, 105)
+
+    def test_snap_reversed_input(self):
+        assert canonical_footprint(105, 115) == (115, 105)
+
+    def test_snap_within_tolerance(self):
+        """114x105 (Kim Phat's actual data) must resolve, not be rejected."""
+        assert canonical_footprint(114, 105) == (115, 105)
+
+    def test_does_not_collide_with_108(self):
+        """105 and 108 are only 3cm apart — every integer value must still
+        resolve to exactly one of them, never both/ambiguous."""
+        assert canonical_footprint(106, 77) == (105, 77)   # closer to 105
+        assert canonical_footprint(107, 77) == (108, 77)   # closer to 108
+
+    def test_blocks_built_no_warning(self):
+        """4 pallets of 114x105x103cm must build cleanly with zero warnings —
+        this is the exact scenario that previously flagged 'unknown footprint'."""
+        pallets = _make_pallets(114, 105, 103, 4)
+        blocks, recs, warnings = build_row_blocks_from_pallets(
+            pallets, W_cm=235, H_cm=269, Hdoor_cm=259, require_multiples=True
+        )
+        assert warnings == []
+        assert recs == {}
+        assert len(blocks) == 1
+        assert blocks[0].value == 4
+        assert blocks[0].block_type_key == "115x105|103cm"
