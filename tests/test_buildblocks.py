@@ -466,3 +466,83 @@ class TestFootprint120x100:
         assert recs == {}
         assert all(b.pallets_across == 3 for b in blocks)
         assert all(b.height_cm == 206 for b in blocks)
+
+
+# ---------------------------------------------------------------------------
+# Cross-height leftover reconciliation (Niels van Lingen's request, July 2026)
+#
+# Same footprint, different exact heights, each too few to complete a clean
+# block on its own — should combine into mixed-height rows instead of each
+# independently asking to "add N pallets".
+# ---------------------------------------------------------------------------
+
+def _pallet(l_cm, w_cm, h_cm, pallet_id):
+    return {"pallet_id": pallet_id, "length": l_cm, "width": w_cm, "height": h_cm, "weight_kg": 50.0}
+
+
+class TestMixedHeightReconciliation:
+
+    def test_niels_example_combines_into_one_block(self):
+        """
+        115x115 leftovers: 1@122cm, 2@93cm, 1@104cm — none complete a clean
+        k=4 block alone (pa=2, s=2 => k=4 for each height in 40HC), but
+        pooled together (4 pallets, pa=2 stacks-per-row) they form exactly
+        one full mixed-height row instead of 3 separate "add N" rejections.
+        """
+        pallets = (
+            [_pallet(115, 115, 122, 1)]
+            + [_pallet(115, 115, 93, i) for i in (2, 3)]
+            + [_pallet(115, 115, 104, 4)]
+        )
+        blocks, recs, warnings = build_row_blocks_from_pallets(
+            pallets, W_cm=235, H_cm=269, Hdoor_cm=259, require_multiples=True
+        )
+        assert warnings == []
+        assert recs == {}, f"expected no recommendations, got {recs}"
+        assert len(blocks) == 1
+        b = blocks[0]
+        assert b.block_type_key == "115x115|mixedcm"
+        assert b.value == 4
+        assert b.pallets_across == 2
+        # tallest stack (122+104=226) sets the row height, capped well under Hdoor
+        assert b.height_cm == 226
+        assert b.height_cm <= 259
+        assert abs(b.weight_kg - 200.0) < 0.01  # 4 pallets x 50kg
+
+    def test_single_height_leftover_still_asks_to_add(self):
+        """
+        No cross-height partner exists (only one height present) — behaviour
+        must be identical to before this feature: reject with "add N pallets".
+        """
+        pallets = _make_pallets(115, 115, 122, 1)
+        blocks, recs, _ = build_row_blocks_from_pallets(
+            pallets, W_cm=235, H_cm=269, Hdoor_cm=259, require_multiples=True
+        )
+        assert blocks == []
+        assert recs.get("115x115|122cm") == 3   # 1 pallet -> needs 3 more to reach k=4
+
+    def test_reconciled_block_never_exceeds_door_height(self):
+        """Even with many wildly different heights pooled, no stack may exceed Hdoor_cm."""
+        heights = [250, 240, 230, 60, 55, 50, 45, 199, 12, 8]
+        pallets = [_pallet(115, 115, h, i) for i, h in enumerate(heights, start=1)]
+        blocks, recs, warnings = build_row_blocks_from_pallets(
+            pallets, W_cm=235, H_cm=269, Hdoor_cm=259, require_multiples=False
+        )
+        assert warnings == []
+        assert all(b.height_cm <= 259 for b in blocks)
+        # every pallet must be accounted for across the mixed blocks
+        assert sum(b.value for b in blocks) == len(heights)
+
+    def test_different_footprints_do_not_cross_contaminate(self):
+        """Leftovers from 115x115 must never combine with leftovers from 115x77."""
+        pallets = (
+            [_pallet(115, 115, 122, 1), _pallet(115, 115, 93, 2)]
+            + [_pallet(115, 77, 121, 3), _pallet(115, 77, 128, 4)]
+        )
+        blocks, recs, warnings = build_row_blocks_from_pallets(
+            pallets, W_cm=235, H_cm=269, Hdoor_cm=259, require_multiples=False
+        )
+        assert warnings == []
+        for b in blocks:
+            footprints = {(int(p["length"]), int(p["width"])) for p in b.pallets}
+            assert len(footprints) == 1, "block mixed pallets from different footprints"

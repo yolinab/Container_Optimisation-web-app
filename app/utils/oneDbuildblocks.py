@@ -144,6 +144,68 @@ def build_block_type_table(W_cm: int, H_cm: int, Hdoor_cm: int) -> Dict[str, Blo
 _CEILING_BUFFER_CM = 9   # clearance between top of stack and container ceiling
 
 
+def _pack_mixed_heights(
+    pallets: List[Dict[str, Any]],
+    pa: int,
+    row_depth: int,
+    L: int,
+    W: int,
+    Hdoor_cm: int,
+    block_id: int,
+) -> Tuple[List["BlockInstance"], int]:
+    """
+    Bin-pack same-footprint pallets of DIFFERING heights into mixed-height
+    stacks, then group `pa` stacks per row. Used only for leftover pallets
+    that couldn't complete a clean single-height block on their own (see
+    build_row_blocks_from_pallets) — this never rejects on count, every
+    pallet always lands in some stack.
+
+    Every stack is capped at Hdoor_cm (not the taller ceiling limit) so the
+    resulting block is guaranteed to fit through the door no matter where
+    the solver ends up placing it in the container — simpler and safer than
+    also generating a separate full-ceiling variant for these leftovers.
+
+    Tallest-first, first-fit: pallets are placed on the floor of whichever
+    existing stack has room, tallest pallets first for physical stability.
+    """
+    ordered = sorted(pallets, key=lambda pm: -int(pm["height"]))
+    stacks: List[List[Dict[str, Any]]] = []
+    stack_heights: List[int] = []
+
+    for pm in ordered:
+        h = int(pm["height"])
+        placed = False
+        for i, sh in enumerate(stack_heights):
+            if sh + h <= Hdoor_cm:
+                stacks[i].append(pm)
+                stack_heights[i] += h
+                placed = True
+                break
+        if not placed:
+            stacks.append([pm])
+            stack_heights.append(h)
+
+    blocks: List[BlockInstance] = []
+    for i in range(0, len(stacks), pa):
+        row_stacks  = stacks[i:i + pa]
+        row_heights = stack_heights[i:i + pa]
+        row_pallets = [pm for s in row_stacks for pm in s]
+        w_sum = sum(float(pm.get("weight_kg") or 0.0) for pm in row_pallets)
+        blocks.append(BlockInstance(
+            block_id=block_id,
+            block_type_key=f"{L}x{W}|mixedcm",
+            length_cm=int(row_depth),
+            height_cm=int(max(row_heights)),
+            weight_kg=w_sum,
+            value=len(row_pallets),
+            pallets=row_pallets,
+            pallets_across=len(row_stacks),
+        ))
+        block_id += 1
+
+    return blocks, block_id
+
+
 def build_row_blocks_from_pallets(
     meta_per_pallet: List[Dict[str,Any]],
     W_cm: int,
@@ -160,7 +222,16 @@ def build_row_blocks_from_pallets(
 
     Key design decisions
     --------------------
-    * Exact pallet heights — each (footprint, exact_height) is its own bucket.
+    * Exact pallet heights — each (footprint, exact_height) is its own bucket,
+      and blocks are built from clean multiples of that bucket first.
+    * Cross-height reconciliation — if a bucket has pallets left over that
+      can't complete a clean block on their own, AND another height bucket of
+      the SAME footprint also has leftovers, those leftovers are pooled and
+      bin-packed together (tallest-first, capped at the door height) into
+      mixed-height rows instead of asking the customer to buy more pallets.
+      A leftover with no cross-height partner still triggers the normal
+      "add N pallets" recommendation — this only kicks in when combining is
+      actually possible.
     * Rotation — rectangular footprints generate blocks for BOTH orientations with
       the CORRECT pallets_across per orientation.
     * Dual stack heights — when usable container height allows more stacks than the
@@ -200,8 +271,8 @@ def build_row_blocks_from_pallets(
         return sorted(seen.values(), key=lambda c: -(c[1] * c[2]))
 
     # ── Greedy allocation: fill n pallets with blocks from configs ─────────
-    def _allocate(n: int, configs: List[Tuple[int,int,int]]) -> Optional[List[int]]:
-        """Returns per-config block counts (descending k order), or None if impossible."""
+    def _allocate(n: int, configs: List[Tuple[int,int,int]], Hraw: int) -> Tuple[List[int], int]:
+        """Returns (per-config block counts in descending k order, leftover pallet count)."""
         counts: List[int] = []
         remaining = n
         for row_depth, pa, s in configs:
@@ -209,40 +280,39 @@ def build_row_blocks_from_pallets(
             c = remaining // k
             counts.append(c)
             remaining -= c * k
-        if remaining != 0:
-            return None
 
-        # If all allocated blocks are door_over (H > Hdoor_cm), convert one
-        # full-stack block into door-stack blocks so there is always at least
-        # one block that fits through the door opening.
-        has_door_ok = any(
-            cnt > 0 and s * Hraw <= Hdoor_cm
-            for (_, _, s), cnt in zip(configs, counts)
-        )
-        if not has_door_ok:
-            # Find first door_over block and a door_ok config to swap into
-            full_idx = next(
-                (i for i, ((_, _, s), c) in enumerate(zip(configs, counts))
-                 if c > 0 and s * Hraw > Hdoor_cm),
-                None,
+        if remaining == 0:
+            # If all allocated blocks are door_over (H > Hdoor_cm), convert one
+            # full-stack block into door-stack blocks so there is always at least
+            # one block that fits through the door opening.
+            has_door_ok = any(
+                cnt > 0 and s * Hraw <= Hdoor_cm
+                for (_, _, s), cnt in zip(configs, counts)
             )
-            door_idx = next(
-                (i for i, (_, _, s) in enumerate(configs)
-                 if s * Hraw <= Hdoor_cm),
-                None,
-            )
-            if full_idx is not None and door_idx is not None:
-                _, pa_f, s_f = configs[full_idx]
-                _, pa_d, s_d = configs[door_idx]
-                k_f, k_d = pa_f * s_f, pa_d * s_d
-                if k_f % k_d == 0:
-                    counts[full_idx] -= 1
-                    counts[door_idx] += k_f // k_d
+            if not has_door_ok:
+                # Find first door_over block and a door_ok config to swap into
+                full_idx = next(
+                    (i for i, ((_, _, s), c) in enumerate(zip(configs, counts))
+                     if c > 0 and s * Hraw > Hdoor_cm),
+                    None,
+                )
+                door_idx = next(
+                    (i for i, (_, _, s) in enumerate(configs)
+                     if s * Hraw <= Hdoor_cm),
+                    None,
+                )
+                if full_idx is not None and door_idx is not None:
+                    _, pa_f, s_f = configs[full_idx]
+                    _, pa_d, s_d = configs[door_idx]
+                    k_f, k_d = pa_f * s_f, pa_d * s_d
+                    if k_f % k_d == 0:
+                        counts[full_idx] -= 1
+                        counts[door_idx] += k_f // k_d
 
-        return counts
+        return counts, remaining
 
     def _min_to_add_multi(n: int, configs: List[Tuple[int,int,int]]) -> int:
-        """Minimum pallets to add so _allocate returns non-None."""
+        """Minimum pallets to add so _allocate would leave no leftover."""
         k_vals = [c[1] * c[2] for c in configs]
         g = k_vals[0]
         for k in k_vals[1:]:
@@ -274,30 +344,16 @@ def build_row_blocks_from_pallets(
             continue
         buckets.setdefault((L, W, Hraw), []).append(pm)
 
-    # ── Multiples check ────────────────────────────────────────────────────
-    recommendations: Dict[str, int] = {}
-    for (L, W, Hraw), plist in buckets.items():
-        configs = _all_configs(L, W, Hraw)
-        dk = _display_key(L, W, Hraw)
-        n  = len(plist)
-        if _allocate(n, configs) is None:
-            recommendations[dk] = (
-                recommendations.get(dk, 0) + _min_to_add_multi(n, configs)
-            )
-
-    if require_multiples and any(recommendations.values()):
-        return [], recommendations, warnings
-
-    # ── Build block instances ──────────────────────────────────────────────
+    # ── Pass 1: build clean per-height blocks; collect leftovers ───────────
     blocks: List[BlockInstance] = []
     block_id = 1
+    # (L, W) -> list of (Hraw, original_bucket_n, leftover_pallets_for_this_height)
+    footprint_leftovers: Dict[Tuple[int,int], List[Tuple[int, int, List[Dict[str,Any]]]]] = {}
 
     for (L, W, Hraw), plist in buckets.items():
         configs = _all_configs(L, W, Hraw)
-        dk      = _display_key(L, W, Hraw)
-        counts = _allocate(len(plist), configs)
-        if counts is None:
-            continue   # require_multiples=False: partial chunk — drop silently
+        n = len(plist)
+        counts, leftover_n = _allocate(n, configs, Hraw)
 
         idx = 0
         for (row_depth, pa, s), n_blocks in zip(configs, counts):
@@ -308,7 +364,7 @@ def build_row_blocks_from_pallets(
                 w_sum = sum(float(pm.get("weight_kg") or 0.0) for pm in chunk)
                 blocks.append(BlockInstance(
                     block_id=block_id,
-                    block_type_key=dk,
+                    block_type_key=_display_key(L, W, Hraw),
                     length_cm=int(row_depth),
                     height_cm=int(block_h),
                     weight_kg=w_sum,
@@ -317,6 +373,34 @@ def build_row_blocks_from_pallets(
                     pallets_across=int(pa),
                 ))
                 block_id += 1
+
+        if leftover_n > 0:
+            footprint_leftovers.setdefault((L, W), []).append((Hraw, n, plist[idx:]))
+
+    # ── Pass 2: reconcile cross-height leftovers per footprint ─────────────
+    # A leftover with no cross-height partner (same footprint, different
+    # height, also leftover) falls back to the original "add N pallets" ask
+    # — this preserves single-height behaviour exactly as before.
+    recommendations: Dict[str, int] = {}
+    for (L, W), entries in footprint_leftovers.items():
+        if len(entries) < 2:
+            Hraw, n, _pallets = entries[0]
+            configs = _all_configs(L, W, Hraw)
+            dk = _display_key(L, W, Hraw)
+            recommendations[dk] = (
+                recommendations.get(dk, 0) + _min_to_add_multi(n, configs)
+            )
+            continue
+
+        pooled = [pm for (_, _, pallets) in entries for pm in pallets]
+        mixed_blocks, block_id = _pack_mixed_heights(
+            pooled, pa=_pa(W), row_depth=L, L=L, W=W,
+            Hdoor_cm=Hdoor_cm, block_id=block_id,
+        )
+        blocks.extend(mixed_blocks)
+
+    if require_multiples and any(recommendations.values()):
+        return [], recommendations, warnings
 
     if blocks:
         print("[oneDbuildblocks] unique block heights:",
