@@ -239,11 +239,18 @@ def run_pipeline(
             lines = []
             for k, v in recommendations.items():
                 human = _humanize_block_key(k)
-                lines.append(f"  {human}: add {v} pallet{'s' if v != 1 else ''}")
+                have, add, row_size = v["have"], v["add"], v["row_size"]
+                plural = "s" if add != 1 else ""
+                lines.append(
+                    f"  {human}: {have} on hand, {row_size} make one full row "
+                    f"— add {add} more pallet{plural} of this size "
+                    f"(or add pallets of a different height at this same "
+                    f"footprint — different heights can combine to fill the row)"
+                )
             detail = "\n".join(lines)
             raise RuntimeError(
-                "Pallet counts are not exact multiples — cannot build complete blocks.\n"
-                "Add the following pallets to your order:\n" + detail
+                "Some pallet sizes don't add up to a full row and have no "
+                "other height to combine with:\n" + detail
             )
 
         blocks = select_one_variant_per_block(blocks)

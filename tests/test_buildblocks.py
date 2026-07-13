@@ -109,7 +109,7 @@ class TestBuildRowBlocks:
         assert blocks == []
         assert len(recs) > 0
         # Must say to add 1 more pallet
-        assert any(v == 1 for v in recs.values())
+        assert any(v["add"] == 1 for v in recs.values())
 
     def test_multiples_not_required_keeps_partial(self):
         """require_multiples=False → partial chunks are dropped but no early exit."""
@@ -377,7 +377,7 @@ class TestFootprint120x100:
             _make_pallets(120, 100, 103, 3), 235, 269, 259
         )
         assert blocks == []
-        assert recs.get("120x100|103cm") == 1
+        assert recs.get("120x100|103cm") == {"have": 3, "add": 1, "row_size": 2}
 
     def test_multiples_5_fails_add_1(self):
         """5 pallets: odd → need +1."""
@@ -385,7 +385,7 @@ class TestFootprint120x100:
             _make_pallets(120, 100, 103, 5), 235, 269, 259
         )
         assert blocks == []
-        assert recs.get("120x100|103cm") == 1
+        assert recs.get("120x100|103cm") == {"have": 5, "add": 1, "row_size": 2}
 
     # ── Container types ─────────────────────────────────────────────────────
 
@@ -519,7 +519,8 @@ class TestMixedHeightReconciliation:
             pallets, W_cm=235, H_cm=269, Hdoor_cm=259, require_multiples=True
         )
         assert blocks == []
-        assert recs.get("115x115|122cm") == 3   # 1 pallet -> needs 3 more to reach k=4
+        # 1 pallet on hand, row needs 4 -> add 3 more
+        assert recs.get("115x115|122cm") == {"have": 1, "add": 3, "row_size": 4}
 
     def test_reconciled_block_never_exceeds_door_height(self):
         """Even with many wildly different heights pooled, no stack may exceed Hdoor_cm."""

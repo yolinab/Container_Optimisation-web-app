@@ -275,14 +275,20 @@ def main(
             lines = []
             for k, v in recommendations.items():
                 human = _humanize_block_key(k)
-                lines.append(f"  {human}: add {v} pallet{'s' if v != 1 else ''}")
+                have, add, row_size = v["have"], v["add"], v["row_size"]
+                plural = "s" if add != 1 else ""
+                lines.append(
+                    f"  {human}: {have} on hand, {row_size} make one full row "
+                    f"— add {add} more pallet{plural} of this size "
+                    f"(or add pallets of a different height at this same "
+                    f"footprint — different heights can combine to fill the row)"
+                )
             detail = "\n".join(lines)
-            print("\nORDER NOT VALID — pallet counts are not exact multiples:")
+            print("\nORDER NOT VALID — some pallet sizes don't add up to a full row:")
             print(detail)
             summary_path = out_dir / "summary.txt"
             with summary_path.open("w", encoding="utf-8") as f:
-                f.write("ORDER NOT VALID — pallet counts are not exact multiples.\n")
-                f.write("Add the following pallets to reach valid block sizes:\n\n")
+                f.write("ORDER NOT VALID — some pallet sizes don't add up to a full row.\n\n")
                 for line in lines:
                     f.write(line.strip() + "\n")
             _log(out_dir, f"Wrote summary: {summary_path}")

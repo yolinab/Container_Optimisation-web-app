@@ -213,11 +213,12 @@ def build_row_blocks_from_pallets(
     Hdoor_cm: int,
     tol_cm: int = 2,
     require_multiples: bool = True
-) -> Tuple[List[BlockInstance], Dict[str,int], List[str]]:
+) -> Tuple[List[BlockInstance], Dict[str, Dict[str, int]], List[str]]:
     """
     Returns:
       blocks: list of BlockInstance
-      recommendations: dict display_key -> pallets to add
+      recommendations: dict display_key -> {"have": on-hand count,
+          "add": pallets still needed, "row_size": pallets per full row}
       warnings: list of issue strings
 
     Key design decisions
@@ -381,15 +382,22 @@ def build_row_blocks_from_pallets(
     # A leftover with no cross-height partner (same footprint, different
     # height, also leftover) falls back to the original "add N pallets" ask
     # — this preserves single-height behaviour exactly as before.
-    recommendations: Dict[str, int] = {}
+    #
+    # recommendations[key] = {"have": <on hand>, "add": <need this many more>,
+    #                          "row_size": <pallets that make one full row>}
+    # so the caller can explain the row-completion math, not just a bare count.
+    recommendations: Dict[str, Dict[str, int]] = {}
     for (L, W), entries in footprint_leftovers.items():
         if len(entries) < 2:
             Hraw, n, _pallets = entries[0]
             configs = _all_configs(L, W, Hraw)
             dk = _display_key(L, W, Hraw)
-            recommendations[dk] = (
-                recommendations.get(dk, 0) + _min_to_add_multi(n, configs)
-            )
+            row_size = min(pa * s for (_, pa, s) in configs)
+            recommendations[dk] = {
+                "have":     n,
+                "add":      _min_to_add_multi(n, configs),
+                "row_size": row_size,
+            }
             continue
 
         pooled = [pm for (_, _, pallets) in entries for pm in pallets]
@@ -399,7 +407,7 @@ def build_row_blocks_from_pallets(
         )
         blocks.extend(mixed_blocks)
 
-    if require_multiples and any(recommendations.values()):
+    if require_multiples and any(v["add"] > 0 for v in recommendations.values()):
         return [], recommendations, warnings
 
     if blocks:
