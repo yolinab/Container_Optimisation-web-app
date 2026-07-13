@@ -271,16 +271,49 @@ def build_row_blocks_from_pallets(
         # Sort descending by k so greedy allocation prefers larger blocks
         return sorted(seen.values(), key=lambda c: -(c[1] * c[2]))
 
-    # ── Greedy allocation: fill n pallets with blocks from configs ─────────
+    # ── Allocation: fill n pallets with blocks from configs ────────────────
     def _allocate(n: int, configs: List[Tuple[int,int,int]], Hraw: int) -> Tuple[List[int], int]:
-        """Returns (per-config block counts in descending k order, leftover pallet count)."""
-        counts: List[int] = []
-        remaining = n
-        for row_depth, pa, s in configs:
-            k = pa * s
-            c = remaining // k
-            counts.append(c)
-            remaining -= c * k
+        """
+        Returns (per-config block counts in configs' order, leftover pallet count).
+
+        A pallet footprint often has more than one valid row layout (e.g. a
+        115x77 pallet can go 6-per-row lengthwise or 4-per-row widthwise).
+        Naively consuming the largest layout first and giving up on whatever's
+        left over misses valid counts — e.g. 8 pallets is a clean multiple of
+        4 but not 6, yet trying k=6 first eats 6, leaves 2, and wrongly
+        declares 2 as unusable leftover even though 2x4=8 fits perfectly.
+
+        This does a small DP over "is total t reachable using some combination
+        of the available layouts" for every t from 0..n, then picks the
+        LARGEST reachable t <= n (so leftover is minimised, and is zero
+        whenever ANY combination of layouts uses every pallet). Among ties in
+        how to reach a given t, larger layouts are preferred first, keeping
+        the original "prefer bigger blocks" intent for straightforward cases.
+        """
+        m = len(configs)
+        k_vals = [pa * s for (_, pa, s) in configs]
+        order = sorted(range(m), key=lambda i: -k_vals[i])  # largest layout first
+
+        reachable = [False] * (n + 1)
+        via = [-1] * (n + 1)
+        reachable[0] = True
+        for t in range(1, n + 1):
+            for i in order:
+                k = k_vals[i]
+                if k <= t and reachable[t - k]:
+                    reachable[t] = True
+                    via[t] = i
+                    break
+
+        best_t = next((t for t in range(n, -1, -1) if reachable[t]), 0)
+        remaining = n - best_t
+
+        counts = [0] * m
+        t = best_t
+        while t > 0:
+            i = via[t]
+            counts[i] += 1
+            t -= k_vals[i]
 
         if remaining == 0:
             # If all allocated blocks are door_over (H > Hdoor_cm), convert one

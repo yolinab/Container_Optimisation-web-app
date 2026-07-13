@@ -547,3 +547,58 @@ class TestMixedHeightReconciliation:
         for b in blocks:
             footprints = {(int(p["length"]), int(p["width"])) for p in b.pallets}
             assert len(footprints) == 1, "block mixed pallets from different footprints"
+
+
+# ---------------------------------------------------------------------------
+# Multi-layout allocation (Niels van Lingen's "multiply of 4 or 6" bug,
+# July 2026): a footprint with more than one valid row layout must recognise
+# ANY layout's clean multiple, not just the largest layout's.
+# ---------------------------------------------------------------------------
+
+class TestMultiLayoutAllocation:
+
+    def test_8_pallets_multiple_of_4_not_6_builds_cleanly(self):
+        """
+        115x77 @ 110cm in 40HC has two layouts: 6-per-row (lengthwise) and
+        4-per-row (widthwise). 8 is a clean multiple of 4 but not 6 — must
+        build 2 full rows of 4, not reject with a leftover of 2.
+        """
+        pallets = _make_pallets(115, 77, 110, 8)
+        blocks, recs, warnings = build_row_blocks_from_pallets(
+            pallets, W_cm=235, H_cm=269, Hdoor_cm=259, require_multiples=True
+        )
+        assert warnings == []
+        assert recs == {}, f"expected no recommendations, got {recs}"
+        assert len(blocks) == 2
+        assert sum(b.value for b in blocks) == 8
+        assert all(b.pallets_across == 2 for b in blocks)   # widthwise layout used
+
+    def test_never_reports_add_zero_pallets(self):
+        """
+        A count that's fully allocatable via SOME layout must never surface
+        as a recommendation at all — "add 0 pallets" is a contradiction
+        (the count is already sufficient) and must not appear.
+        """
+        for n in range(1, 40):
+            pallets = _make_pallets(115, 77, 110, n)
+            _, recs, _ = build_row_blocks_from_pallets(
+                pallets, W_cm=235, H_cm=269, Hdoor_cm=259, require_multiples=False
+            )
+            for v in recs.values():
+                assert v["add"] > 0, f"n={n} produced a zero-add recommendation: {v}"
+
+    def test_no_pallets_silently_dropped_when_fully_allocatable(self):
+        """
+        When a count is fully allocatable via some layout (no recommendation
+        needed), every pallet must end up in a block — this is exactly the
+        bug that lost 2 of 8 pallets before the fix.
+        """
+        for n in range(1, 60):
+            pallets = _make_pallets(115, 77, 110, n)
+            blocks, recs, _ = build_row_blocks_from_pallets(
+                pallets, W_cm=235, H_cm=269, Hdoor_cm=259, require_multiples=False
+            )
+            if recs:
+                continue  # genuine shortfall — not what this test checks
+            accounted = sum(b.value for b in blocks)
+            assert accounted == n, f"n={n}: only {accounted} of {n} pallets ended up in blocks"
